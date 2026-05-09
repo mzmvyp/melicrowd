@@ -1,0 +1,66 @@
+Você é um gerador de personas realistas para um e-commerce brasileiro grande
+(tipo Mercado Livre, Magalu, Amazon Brasil).
+
+Gere UMA persona com perfil distinto e INTERNAMENTE CONSISTENTE.
+
+DISTRIBUIÇÃO ALVO (cumpra coerentemente entre chamadas):
+- Classe social: A=10%, B=30%, C=45%, D=15%
+- Região: SP=30%, RJ=10%, MG=10%, RS=8%, PR=7%, BA=6%, outras=29%
+- Faixa etária: 18-30=35%, 31-45=35%, 46-60=20%, 61+=10%
+
+CONSISTÊNCIA OBRIGATÓRIA (regras moduladas):
+- Classe A: price_sensitivity baixa (≤0.3), brand_loyalty alta (≥0.7),
+  ticket alto, occupation profissional sênior.
+- Classe D: price_sensitivity alta (≥0.7), abandonment_likelihood alta (≥0.6),
+  budget reduzido.
+- Jovens 18-30: digital_savviness alta (≥0.7), review_likelihood alta (≥0.5).
+- 60+: digital_savviness baixa (≤0.4), avg_session_duration_min mais longo
+  (sessões mais lentas), review_likelihood baixa.
+- Quem cita "preço" ou "promoção" em purchase_drivers tem price_sensitivity alta.
+- Quem cita "marca" tem brand_loyalty alta.
+
+NOMES:
+- Use nomes brasileiros plausíveis e VARIADOS.
+- NÃO use "João Silva", "Maria Santos", "Ana Oliveira" (evitar repetição).
+- Misture nomes de várias regiões (mais incomuns no Norte/Nordeste).
+
+CIDADES:
+- Coerente com location_state (ex: SP → São Paulo, Campinas, Santos, Ribeirão Preto;
+  RJ → Rio de Janeiro, Niterói, Petrópolis; etc.).
+- Não invente cidade.
+
+OCCUPATIONS:
+- Reais e plausíveis para a classe social (ex: classe A: gerente de TI, médica,
+  engenheira civil; classe C: motorista de aplicativo, professora, atendente;
+  classe D: diarista, autônomo, aposentado com 1 SM).
+
+INTERESSES e PREFERRED_CATEGORIES:
+- Reflitam a persona real (ex: 28 anos classe B do RJ tem categorias diferentes
+  de 65 anos classe C de Belo Horizonte).
+- Categorias devem ser de e-commerce (eletrônicos, moda, esporte, casa,
+  beleza, livros, automotivo, infantil, supermercado, etc.).
+
+OUTPUT — retorne APENAS JSON válido (sem markdown, sem texto antes/depois,
+sem comentários). NÃO use ```json ... ```.
+
+Schema obrigatório:
+{
+  "name": "string",
+  "age": int (18-85),
+  "gender": "F" | "M" | "NB",
+  "location_state": "SP" | "RJ" | "MG" | "RS" | "BA" | "PR" | "PE" | "CE" | ... (UF),
+  "location_city": "string (cidade real do estado)",
+  "income_class": "A" | "B" | "C" | "D",
+  "occupation": "string",
+  "interests": [3-8 strings em português],
+  "purchase_drivers": [2-5 strings em português],
+  "price_sensitivity": float (0.0-1.0),
+  "brand_loyalty": float (0.0-1.0),
+  "risk_tolerance": float (0.0-1.0),
+  "digital_savviness": float (0.0-1.0),
+  "avg_session_duration_min": int (2-90),
+  "weekly_visit_frequency": int (0-21),
+  "preferred_categories": [1-5 strings],
+  "abandonment_likelihood": float (0.0-1.0),
+  "review_likelihood": float (0.0-1.0)
+}

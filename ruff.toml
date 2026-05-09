@@ -1,0 +1,45 @@
+target-version = "py311"
+line-length = 100
+extend-exclude = ["infra/postgres/migrations/versions"]
+
+[lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "C4",   # flake8-comprehensions
+  "UP",   # pyupgrade
+  "SIM",  # flake8-simplify
+  "ASYNC",# flake8-async
+  "RUF",  # ruff-specific
+  "ANN",  # annotations (reinforces 100% type hints rule)
+  "D",    # pydocstyle (Google style enforced below)
+  "T20",  # forbids `print` (use loguru)
+  "TCH",  # type-checking imports
+  "ARG",  # unused arguments
+  "PL",   # pylint subset
+  "PT",   # pytest style
+]
+ignore = [
+  "ANN401",  # disallow dynamic Any — relaxed where stubs are missing
+  "D203",    # incompatible with D211
+  "D213",    # incompatible with D212
+  "PLR0913", # too many args (FastAPI deps)
+  "PLR2004", # magic value (acceptable in tests)
+]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["D", "ANN", "PLR", "ARG"]
+"src/melicrowd/cli.py" = ["T201"]  # CLI may print to stdout via typer
+"src/melicrowd/ui/**/*.py" = ["D", "T20"]  # Streamlit uses st.write, OK
+
+[lint.pydocstyle]
+convention = "google"
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true

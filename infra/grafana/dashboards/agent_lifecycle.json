@@ -1,0 +1,50 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "title": "MeliCrowd — Agent Lifecycle",
+  "uid": "melicrowd-lifecycle",
+  "tags": ["melicrowd"],
+  "schemaVersion": 36,
+  "version": 1,
+  "panels": [
+    {
+      "type": "histogram",
+      "title": "Session duration (p50/p95/p99)",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 9},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(melicrowd_session_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(melicrowd_session_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(melicrowd_session_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C"}
+      ]
+    },
+    {
+      "type": "piechart",
+      "title": "Outcome breakdown (1h)",
+      "gridPos": {"x": 0, "y": 9, "w": 12, "h": 8},
+      "targets": [{
+        "expr": "sum by (outcome) (increase(melicrowd_sessions_completed_total[1h]))",
+        "legendFormat": "{{outcome}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "barchart",
+      "title": "Cart value distribution by outcome",
+      "gridPos": {"x": 12, "y": 9, "w": 12, "h": 8},
+      "targets": [{
+        "expr": "sum by (outcome, le) (rate(melicrowd_cart_value_brl_bucket[1h]))",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Agents per state (hot states)",
+      "gridPos": {"x": 0, "y": 17, "w": 24, "h": 8},
+      "targets": [{
+        "expr": "melicrowd_agents_per_state",
+        "legendFormat": "{{state}}",
+        "refId": "A"
+      }]
+    }
+  ]
+}

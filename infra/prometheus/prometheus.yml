@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# Prometheus — configuração de scraping para o MeliCrowd
+# Standalone: não federado com prometheus do melisimlake.
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: melicrowd
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # API expõe /metrics com counters/histograms de control plane.
+  - job_name: melicrowd-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8101"]
+
+  # Orchestrator expõe /metrics num servidor HTTP dedicado (porta 9092 interna).
+  - job_name: melicrowd-orchestrator
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["orchestrator:9092"]

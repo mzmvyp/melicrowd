@@ -1,0 +1,60 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "title": "MeliCrowd — LLM Performance",
+  "uid": "melicrowd-llm",
+  "tags": ["melicrowd"],
+  "schemaVersion": 36,
+  "version": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Qwen latency p50/p95/p99 (s)",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 9},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le, node) (rate(melicrowd_qwen_latency_seconds_bucket[5m])))", "legendFormat": "{{node}} p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le, node) (rate(melicrowd_qwen_latency_seconds_bucket[5m])))", "legendFormat": "{{node}} p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le, node) (rate(melicrowd_qwen_latency_seconds_bucket[5m])))", "legendFormat": "{{node}} p99", "refId": "C"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Fallback rate (1h)",
+      "gridPos": {"x": 0, "y": 9, "w": 8, "h": 5},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "targets": [{
+        "expr": "sum(rate(melicrowd_qwen_calls_total{fallback_used=\"true\"}[1h])) / sum(rate(melicrowd_qwen_calls_total[1h]))",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput (calls/min) by node",
+      "gridPos": {"x": 8, "y": 9, "w": 16, "h": 5},
+      "targets": [{
+        "expr": "sum by (node) (rate(melicrowd_qwen_calls_total[5m])) * 60",
+        "legendFormat": "{{node}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool depth (in_flight + waiting)",
+      "gridPos": {"x": 0, "y": 14, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "melicrowd_qwen_in_flight", "legendFormat": "in_flight", "refId": "A"},
+        {"expr": "melicrowd_qwen_waiting", "legendFormat": "waiting", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors by type",
+      "gridPos": {"x": 12, "y": 14, "w": 12, "h": 8},
+      "targets": [{
+        "expr": "sum by (error_type) (rate(melicrowd_qwen_errors_total[5m]))",
+        "legendFormat": "{{error_type}}",
+        "refId": "A"
+      }]
+    }
+  ]
+}

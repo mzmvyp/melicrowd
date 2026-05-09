@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:/Users/Willian/python_projects/melisimlake\" status --short --branch)",
+      "Bash(git -C \"C:/Users/Willian/python_projects/melisimlake\" log --oneline -5)"
+    ]
+  }
+}

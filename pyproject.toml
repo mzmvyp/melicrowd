@@ -1,0 +1,111 @@
+[tool.poetry]
+name = "melicrowd"
+version = "0.1.0"
+description = "MeliCrowd — simulador multi-agente de tráfego realista para o Melisim."
+authors = ["Willian Oliveira <willian@example.com>"]
+readme = "README.md"
+license = "MIT"
+packages = [{ include = "melicrowd", from = "src" }]
+
+[tool.poetry.scripts]
+melicrowd = "melicrowd.cli:app"
+
+[tool.poetry.dependencies]
+python = "~3.11"
+
+# Async runtime
+uvloop = { version = "^0.21.0", markers = "sys_platform != 'win32'" }
+
+# Agent framework
+langgraph = "^0.2.74"
+langchain = "^0.3.18"
+langchain-community = "^0.3.17"
+langchain-ollama = "^0.2.3"
+
+# HTTP / Kafka / retry
+httpx = "^0.28.1"
+aiokafka = "^0.12.0"
+tenacity = "^9.0.0"
+
+# Persistence
+redis = { extras = ["hiredis"], version = "^5.2.1" }
+asyncpg = "^0.30.0"
+sqlalchemy = { extras = ["asyncio"], version = "^2.0.36" }
+alembic = "^1.14.1"
+greenlet = "^3.1.1"
+
+# Validation / config
+pydantic = "^2.10.4"
+pydantic-settings = "^2.7.1"
+
+# Observability
+prometheus-client = "^0.21.1"
+loguru = "^0.7.3"
+opentelemetry-api = "^1.29.0"
+opentelemetry-sdk = "^1.29.0"
+opentelemetry-exporter-otlp-proto-http = "^1.29.0"
+
+# Control plane / UI / CLI
+fastapi = "^0.115.6"
+uvicorn = { extras = ["standard"], version = "^0.34.0" }
+streamlit = "^1.41.1"
+typer = "^0.15.1"
+slowapi = "^0.1.9"
+
+# Numerics for Markov chain
+numpy = "^2.2.1"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.1"
+mypy = "^1.14.1"
+pre-commit = "^4.0.1"
+pytest = "^8.3.4"
+pytest-asyncio = "^0.25.2"
+pytest-cov = "^6.0.0"
+pytest-mock = "^3.14.0"
+pytest-timeout = "^2.3.1"
+testcontainers = { extras = ["postgres", "redis", "kafka"], version = "^4.9.0" }
+locust = "^2.32.6"
+respx = "^0.22.0"
+freezegun = "^1.5.1"
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--tb=short",
+]
+markers = [
+  "integration: requires external services (Postgres, Redis, Kafka) via testcontainers",
+  "e2e: end-to-end test requiring full Melisim/MeliSimLake stack",
+  "slow: takes more than 5s",
+]
+
+[tool.coverage.run]
+source = ["src/melicrowd"]
+branch = true
+omit = [
+  "*/tests/*",
+  "*/__init__.py",
+  "src/melicrowd/cli.py",
+  "src/melicrowd/ui/*",
+]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_empty = true
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]

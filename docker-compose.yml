@@ -1,0 +1,191 @@
+---
+# =============================================================================
+# MeliCrowd — Docker Compose (stack base)
+#
+# Sobe 5 serviços do MeliCrowd e se conecta às redes externas dos vizinhos:
+#   - melisim_melisim (criada pelo MeliSim, usada para chamar api-gateway)
+#   - melisimlake-net (criada pelo melisimlake, usada para Kafka + Schema Registry)
+#
+# Pré-requisitos: ambos os projetos vizinhos devem estar com `make up` rodado
+# antes (para as redes externas existirem).
+#
+# Portas externas escolhidas para evitar conflito com vizinhos:
+#   5437 (postgres) / 6381 (redis) / 8101 (api) / 8502 (ui) / 9091 (prometheus)
+# Veja RECON.md seção 4 para o inventário completo.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Persistence
+  # ---------------------------------------------------------------------------
+  postgres-melicrowd:
+    image: postgres:16.3
+    container_name: melicrowd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: melicrowd
+      POSTGRES_PASSWORD: melicrowd123
+      POSTGRES_DB: melicrowd
+    ports:
+      - "5437:5432"
+    volumes:
+      - postgres-melicrowd-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "melicrowd", "-d", "melicrowd"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - melicrowd-net
+
+  redis-melicrowd:
+    image: redis:7.4-alpine
+    container_name: melicrowd-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"
+    volumes:
+      - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-melicrowd-data:/data
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - melicrowd-net
+
+  # ---------------------------------------------------------------------------
+  # Observability (standalone — não federado com prometheus do melisimlake)
+  # ---------------------------------------------------------------------------
+  prometheus-melicrowd:
+    image: prom/prometheus:v2.53.0
+    container_name: melicrowd-prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-melicrowd-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=2d"
+      - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - melicrowd-net
+
+  # ---------------------------------------------------------------------------
+  # Control plane (FastAPI)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: melicrowd:latest
+    container_name: melicrowd-api
+    restart: unless-stopped
+    command:
+      - "uvicorn"
+      - "melicrowd.api.main:app"
+      - "--host=0.0.0.0"
+      - "--port=8101"
+      - "--log-config=infra/logging/uvicorn.json"
+    ports:
+      - "8101:8101"
+    env_file: [.env]
+    depends_on:
+      postgres-melicrowd:
+        condition: service_healthy
+      redis-melicrowd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8101/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - melicrowd-net
+      - melisim_melisim
+      - melisimlake-net
+
+  # ---------------------------------------------------------------------------
+  # Orchestrator (pool de N agentes paralelos — sem porta exposta)
+  # ---------------------------------------------------------------------------
+  orchestrator:
+    image: melicrowd:latest
+    container_name: melicrowd-orchestrator
+    restart: unless-stopped
+    command: ["python", "-m", "melicrowd.orchestrator.main"]
+    env_file: [.env]
+    depends_on:
+      api:
+        condition: service_started
+      postgres-melicrowd:
+        condition: service_healthy
+      redis-melicrowd:
+        condition: service_healthy
+    networks:
+      - melicrowd-net
+      - melisim_melisim
+      - melisimlake-net
+
+  # ---------------------------------------------------------------------------
+  # UI (Streamlit)
+  # ---------------------------------------------------------------------------
+  ui:
+    image: melicrowd:latest
+    container_name: melicrowd-ui
+    restart: unless-stopped
+    command:
+      - "streamlit"
+      - "run"
+      - "src/melicrowd/ui/streamlit_app.py"
+      - "--server.address=0.0.0.0"
+      - "--server.port=8501"
+      - "--server.headless=true"
+      - "--browser.gatherUsageStats=false"
+    ports:
+      - "8502:8501"
+    env_file: [.env]
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - melicrowd-net
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres-melicrowd-data:
+  redis-melicrowd-data:
+  prometheus-melicrowd-data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  # Rede interna do MeliCrowd (postgres, redis, prometheus, api, ui, orchestrator).
+  melicrowd-net:
+    name: melicrowd-net
+    driver: bridge
+
+  # Redes externas dos vizinhos (devem existir antes do `make up`).
+  # Se algum vizinho não estiver rodado, suba o docker-compose.override.yml
+  # com o profile dev-isolated (ver RUNBOOK.md).
+  melisim_melisim:
+    external: true
+    name: melisim_melisim
+
+  melisimlake-net:
+    external: true
+    name: melisimlake-net

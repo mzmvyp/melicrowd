@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# MeliCrowd — Override de desenvolvimento (carregado automaticamente pelo Compose)
+#
+# Hot-reload de código: bind mount de src/ dentro dos containers Python.
+# Para desabilitar este override (rodar como produção), use:
+#   docker compose -f docker-compose.yml up -d
+# =============================================================================
+
+services:
+  api:
+    command:
+      - "uvicorn"
+      - "melicrowd.api.main:app"
+      - "--host=0.0.0.0"
+      - "--port=8101"
+      - "--reload"
+      - "--reload-dir=/app/src"
+    volumes:
+      - ./src:/app/src
+      - ./infra:/app/infra
+
+  orchestrator:
+    volumes:
+      - ./src:/app/src
+      - ./infra:/app/infra
+
+  ui:
+    command:
+      - "streamlit"
+      - "run"
+      - "src/melicrowd/ui/streamlit_app.py"
+      - "--server.address=0.0.0.0"
+      - "--server.port=8501"
+      - "--server.headless=true"
+      - "--server.runOnSave=true"
+      - "--browser.gatherUsageStats=false"
+    volumes:
+      - ./src:/app/src

@@ -1,0 +1,73 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "MeliCrowd — Overview",
+  "uid": "melicrowd-overview",
+  "tags": ["melicrowd"],
+  "schemaVersion": 36,
+  "version": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Agentes ativos",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "melicrowd_active_agents", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Sessões/min (últimos 5min)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "rate(melicrowd_sessions_started_total[5m]) * 60", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Conversion rate (1h)",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "targets": [{
+        "expr": "sum(rate(melicrowd_sessions_completed_total{outcome=\"purchased\"}[1h])) / sum(rate(melicrowd_sessions_completed_total[1h]))",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "stat",
+      "title": "Cart abandonment (1h)",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "targets": [{
+        "expr": "sum(rate(melicrowd_sessions_completed_total{outcome=\"abandoned_cart\"}[1h])) / sum(rate(melicrowd_sessions_completed_total[1h]))",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Outcome distribution",
+      "gridPos": {"x": 0, "y": 4, "w": 24, "h": 8},
+      "targets": [{
+        "expr": "sum by (outcome) (rate(melicrowd_sessions_completed_total[5m]))",
+        "legendFormat": "{{outcome}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Qwen pool — in_flight vs waiting",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "melicrowd_qwen_in_flight", "legendFormat": "in_flight", "refId": "A"},
+        {"expr": "melicrowd_qwen_waiting", "legendFormat": "waiting", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Melisim call rate by status",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "targets": [{
+        "expr": "sum by (status) (rate(melicrowd_melisim_calls_total[5m]))",
+        "legendFormat": "{{status}}",
+        "refId": "A"
+      }]
+    }
+  ]
+}
