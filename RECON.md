@@ -1,9 +1,11 @@
 # RECON — Reconhecimento Pré-Implementação
 
-> **Status:** Concluído. Aguardando aprovação para iniciar Fase 1.
-> **Data:** 2026-05-06
-> **Autor:** Claude Opus 4.7
-> **Sistemas inspecionados:** `MeliSim`, `melisimlake`
+> **Status:** documento histórico. Reconhecimento concluído e todas as decisões
+> abaixo foram aprovadas e implementadas. Mantido como registro do processo de
+> *due diligence* feito antes da primeira linha de código — útil para entender
+> de onde vieram as escolhas que aparecem hoje em `ARCHITECTURE.md`.
+>
+> **Sistemas inspecionados:** `MeliSim`, data lake.
 
 Este documento mapeia o terreno antes de qualquer linha de código do MeliCrowd.
 Lista endpoints, redes, portas, tópicos Kafka, conflitos e gaps. **Aprovação

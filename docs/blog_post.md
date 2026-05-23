@@ -21,7 +21,7 @@ Quando você precisa testar comportamento de um e-commerce sob carga *humana*
 3. **Decisões binárias** — adiciona ao carrinho ou não, sem o "vou comparar
    mais 3 produtos antes" que é o coração do funil real.
 
-Para um portfolio de Senior Data/ML Engineer, eu queria algo que demonstrasse:
+Os objetivos técnicos que guiaram o projeto:
 - **multi-agent orchestration** real (não tutorial),
 - **LLM em produção** com constraints reais (latência, custo, fallback),
 - **async distributed Python** (uvloop, semaphores, graceful shutdown),
@@ -138,11 +138,12 @@ Cada nó retorna um dict com os campos que mudou; LangGraph faz merge no state.
 Com 50 agentes paralelos, o Qwen 14B em Ollama local satura instantaneamente
 se eu permitir 50 chamadas simultâneas. Latência p99 explode de 8s para 60s+.
 
-A solução é um **semaphore async** (pool=4):
+A solução é um **semaphore async** (pool configurável; default 12, calibrado ao
+GPU disponível):
 
 ```python
 class QwenPool:
-    def __init__(self, max_concurrent: int = 4):
+    def __init__(self, max_concurrent: int = 12):
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._in_flight = 0
         self._waiting = 0
@@ -165,7 +166,7 @@ Isso aumenta latência média (alguns agentes esperam) mas mantém p99 estável.
 Trade-off explícito, monitorado via dashboard:
 
 ```promql
-melicrowd_qwen_in_flight  # sempre ≤ 4
+melicrowd_qwen_in_flight  # sempre ≤ max_concurrent
 melicrowd_qwen_waiting    # cresce em burst, drena rápido
 histogram_quantile(0.99, melicrowd_qwen_latency_seconds_bucket)
 ```
@@ -196,10 +197,10 @@ real faria.
 
 ---
 
-## Realismo: o que separa demo de portfolio
+## Realismo: o que separa demo de sistema sério
 
-O recrutador percebe se o conversion rate sai 50% (fake) ou 3% (real).
-Calibrei com:
+Um conversion rate de 50% denuncia simulação artificial; 3% é o que o varejo
+real entrega. Calibrei com:
 
 - **Benchmarks públicos** — Mercado Livre, Magalu, Amazon BR de 2024-25.
 - **Erro humano injetado** — 5% das chamadas HTTP simulam timeout (com retry),
@@ -275,26 +276,37 @@ Os 3 dashboards Grafana (`melicrowd_overview`, `agent_lifecycle`,
    nó cai num heurístico baseado nos atributos da persona. Sessão termina,
    trace marca `fallback_used=true`. Sem isso, 1 falha do Ollama trava 50
    agentes.
-4. **Backpressure é mais importante que throughput.** Pool=4 sustenta 50
-   agentes; pool=10 derruba o Ollama em 30s.
+4. **Backpressure é mais importante que throughput.** Um semaphore bem
+   calibrado sustenta dezenas de agentes; sem teto, qualquer burst derruba o
+   Ollama em segundos. O valor certo depende do GPU — meça, não chute.
 5. **Calibrar com dados reais.** Sem os benchmarks de Mercado Livre/Magalu,
-   o simulador iria gerar "1000 vendas/min" e qualquer recrutador
-   identificaria como fake.
+   o simulador geraria "1000 vendas/min" — números que invalidam qualquer
+   conclusão extraída dos dados.
 
 ---
+
+## Evolução: de um agente para um marketplace vivo
+
+O design descrito acima é a fundação. A partir dele, a plataforma cresceu para
+**três populações de agentes** que coexistem:
+
+- **Buyers** — o grafo LangGraph descrito neste artigo.
+- **Sellers** — vendedores que auditam inventário, repõem estoque e criam
+  produtos num loop procedural mais simples (LangGraph seria overhead).
+- **Tech Lead** — um agente que usa um LLM de *reasoning* (DeepSeek V4 Pro) para
+  gerar tarefas técnicas de melhoria com **critérios de aceite verificáveis por
+  máquina**, e que avalia e fecha as tarefas automaticamente. O LLM propõe; quem
+  decide se está pronto são checks objetivos (Postgres, OpenAPI, Prometheus,
+  git, pytest) — não o próprio LLM.
+
+Esse último é o padrão mais interessante: orquestrar um LLM com verificação
+objetiva e trilha de auditoria, em vez de confiar no julgamento do modelo.
 
 ## Código
 
-[github.com/willian/MeliCrowd](https://github.com/willian/MeliCrowd) — open
+[github.com/mzmvyp/melicrowd](https://github.com/mzmvyp/melicrowd) — open
 source, MIT.
-
-Próximas iterações em consideração: replay determinístico (mesma seed →
-mesma jornada), mais 4 personas-arquétipo (estudante, aposentado,
-profissional liberal, dona-de-casa), e um endpoint
-`POST /sessions/scenario` para reproduzir cenários específicos
-("70% browse, classe A, SP").
 
 ---
 
-*Construído com Python 3.11, LangGraph e Qwen 3 14B local. Usado como
-peça de portfolio para vagas Senior Data/ML/AI Engineer.*
+*Construído com Python 3.11, LangGraph, Qwen 3 14B local e DeepSeek V4 Pro.*

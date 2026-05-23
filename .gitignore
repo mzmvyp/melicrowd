@@ -56,6 +56,11 @@ logs/
 *.log
 build.log
 
+# Local study/scratch notes (not part of the project)
+ESTUDO_*.md
+scripts/_probe_*.py
+frontend/scraps/
+
 # Streamlit
 .streamlit/secrets.toml
 

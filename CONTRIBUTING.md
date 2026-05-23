@@ -1,5 +1,24 @@
 # Convenções de contribuição
 
+Este documento descreve as convenções esperadas em qualquer mudança no
+MeliCrowd: estilo de código, estrutura de módulos, fluxo de PR e padrão de
+commits. Antes de abrir uma mudança, vale também ler **[ARCHITECTURE.md](ARCHITECTURE.md)**
+para entender as camadas e os trade-offs do sistema.
+
+## Onde sua mudança vive
+
+| Tipo de mudança | Pacote |
+|---|---|
+| Comportamento de **buyer** (grafo, nós, prompts, edges) | `src/melicrowd/agents/` |
+| Comportamento de **seller** (ações, prompts) | `src/melicrowd/sellers/` |
+| **Tech Lead Agent** (backlog, gerador, evaluator, checks) | `src/melicrowd/tech_lead/` |
+| Cliente LLM, pool e trace | `src/melicrowd/llm/` |
+| Camada de execução (Markov, HTTP, Kafka, rate limit) | `src/melicrowd/execution/` |
+| Lifecycle de pools e schedulers | `src/melicrowd/orchestrator/` |
+| Routers/schemas FastAPI | `src/melicrowd/api/` |
+| Migrations | `infra/postgres/migrations/versions/` |
+| Frontend (Live Floor, Topology, Tasks) | `frontend/` |
+
 ## Estilo de código (não-negociável)
 
 1. **Type hints em 100%** do código Python. Sem `Any` exceto interface com libs sem stubs.
@@ -66,21 +85,30 @@ Pre-commit hooks rodam automaticamente em `git commit` (instale com
 
 ## Commits
 
-Padrão: tema + escopo + descrição em inglês.
+Conventional Commits, escopo por subsistema, descrição curta em inglês.
 
 ```
-feat(personas): add Qwen-based generator
-test(orchestrator): cover graceful shutdown
+feat(buyers): add price-comparison node to LangGraph
+feat(sellers): action update_price with category-aware percent
+feat(tech-lead): add metric check kind to evaluator
 fix(llm/pool): release semaphore on cancellation
-docs(architecture): explain backpressure decisions
+test(orchestrator): cover graceful shutdown
+docs(architecture): explain Tech Lead evaluator
 chore(infra): pin postgres to 16.3
 ```
 
-Commits pequenos por sub-feature. Evite commits gigantes.
+Escopos preferidos: `buyers`, `sellers`, `tech-lead`, `llm`, `execution`,
+`orchestrator`, `api`, `frontend`, `infra`, `observability`.
+
+Commits pequenos por sub-feature. Evite commits gigantes que misturem áreas.
 
 ## Quando fazer PR
 
-- Código tem testes (≥75% coverage).
+- Código tem testes (≥ 75 % coverage no pacote tocado).
 - `make lint typecheck test` passam localmente.
-- `RUNBOOK.md` ou `ARCHITECTURE.md` atualizados se mudou comportamento operacional.
-- Sem segredos em arquivos versionados.
+- `RUNBOOK.md` ou `ARCHITECTURE.md` atualizados quando o comportamento
+  operacional ou as camadas mudam.
+- Migrations Alembic com `downgrade` funcional.
+- Sem segredos em arquivos versionados (`.env` está no `.gitignore`).
+- Se a mudança envolve um endpoint novo ou uma métrica nova, ambos aparecem
+  respectivamente em `/openapi.json` e em `/metrics` antes do merge.
