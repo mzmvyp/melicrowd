@@ -128,27 +128,71 @@ migrate-history: ## Mostra histórico de migrations
 	$(COMPOSE) run --rm api alembic history --verbose
 
 # ---------------------------------------------------------------------------
-# Operação dos agentes (placeholders — implementação real nas Fases 5-6)
+# Operação dos buyers (pool LangGraph)
 # ---------------------------------------------------------------------------
 
 .PHONY: start
-start: ## Inicia o pool de agentes: make start AGENTS=50
+start: ## Inicia o pool de buyers: make start AGENTS=50
 	@count=$${AGENTS:-50}; \
 	  curl -fsS -X POST "http://localhost:8101/start?agents=$$count" | jq
 
 .PHONY: stop
-stop: ## Para o pool gracefully
+stop: ## Para o pool de buyers gracefully
 	@curl -fsS -X POST "http://localhost:8101/stop?graceful=true" | jq
 
 .PHONY: scale
-scale: ## Redimensiona o pool: make scale AGENTS=100
+scale: ## Redimensiona o pool de buyers: make scale AGENTS=100
 	@count=$${AGENTS:-50}; \
 	  curl -fsS -X POST "http://localhost:8101/scale?agents=$$count" | jq
 
 .PHONY: seed-personas
-seed-personas: ## Gera N personas via Qwen: make seed-personas COUNT=200
+seed-personas: ## Gera N personas buyer via Qwen (lento — exige Ollama): make seed-personas COUNT=200
 	@n=$${COUNT:-200}; \
 	  curl -fsS -X POST "http://localhost:8101/personas/generate?count=$$n" | jq
+
+.PHONY: seed-synthetic
+seed-synthetic: ## Insere N personas buyer sintéticas SEM Qwen (rápido, dev): make seed-synthetic COUNT=60
+	@n=$${COUNT:-60}; \
+	  $(COMPOSE) exec -T api python -m melicrowd.cli personas seed-synthetic --count $$n
+
+# ---------------------------------------------------------------------------
+# Operação dos sellers (pool procedural)
+# ---------------------------------------------------------------------------
+
+.PHONY: seed-sellers
+seed-sellers: ## Insere N personas seller sintéticas: make seed-sellers COUNT=5
+	@n=$${COUNT:-5}; \
+	  $(COMPOSE) exec -T api python -m melicrowd.cli sellers seed-synthetic --count $$n
+
+.PHONY: start-sellers
+start-sellers: ## Inicia o pool de sellers: make start-sellers SELLERS=5
+	@count=$${SELLERS:-5}; \
+	  curl -fsS -X POST "http://localhost:8101/sellers/start?workers=$$count" | jq
+
+.PHONY: stop-sellers
+stop-sellers: ## Para o pool de sellers
+	@curl -fsS -X POST "http://localhost:8101/sellers/stop" | jq
+
+.PHONY: scale-sellers
+scale-sellers: ## Redimensiona o pool de sellers: make scale-sellers SELLERS=10
+	@count=$${SELLERS:-5}; \
+	  curl -fsS -X POST "http://localhost:8101/sellers/scale?workers=$$count" | jq
+
+# ---------------------------------------------------------------------------
+# Tech Lead Agent (DeepSeek V4 Pro)
+# ---------------------------------------------------------------------------
+
+.PHONY: tech-lead-task
+tech-lead-task: ## Gera 1 task via DeepSeek e persiste no Postgres
+	@curl -fsS -X POST "http://localhost:8101/tasks/generate" | jq '.task | {task_id, title, category, priority, generation_cost_usd, criteria: (.acceptance_criteria | length)}'
+
+.PHONY: tech-lead-list
+tech-lead-list: ## Lista tasks do Tech Lead (status + título)
+	@curl -fsS "http://localhost:8101/tasks?limit=50" | jq '.items[] | {status, priority, title}'
+
+.PHONY: tech-lead-count
+tech-lead-count: ## Contagem de tasks por status
+	@curl -fsS "http://localhost:8101/tasks?limit=1" | jq '.counts_by_status'
 
 # ---------------------------------------------------------------------------
 # Qualidade de código
@@ -204,6 +248,18 @@ coverage-html: ## Gera relatório HTML de cobertura
 # Atalhos para abrir UIs
 # ---------------------------------------------------------------------------
 
+.PHONY: open-floor
+open-floor: ## Abre Live Floor (UI principal de observabilidade)
+	@python -m webbrowser http://localhost:8503 || echo "Abra http://localhost:8503"
+
+.PHONY: open-topology
+open-topology: ## Abre Topology (NOC) — mapa de calor entre estações
+	@python -m webbrowser http://localhost:8503/topology.html || echo "Abra http://localhost:8503/topology.html"
+
+.PHONY: open-tasks
+open-tasks: ## Abre Tasks (Kanban do Tech Lead Agent)
+	@python -m webbrowser http://localhost:8503/tasks.html || echo "Abra http://localhost:8503/tasks.html"
+
 .PHONY: open-ui
 open-ui: ## Abre Streamlit no browser
 	@python -m webbrowser http://localhost:8502 || echo "Abra http://localhost:8502"
@@ -219,11 +275,15 @@ open-prometheus: ## Abre Prometheus
 .PHONY: ports
 ports: ## Lista as portas expostas pelo MeliCrowd
 	@echo ""
-	@echo "  Serviço          URL                              Credencial"
-	@echo "  ──────────────   ────────────────────────────     ─────────────────"
-	@echo "  api (Swagger)    http://localhost:8101/docs       —"
-	@echo "  ui (Streamlit)   http://localhost:8502            —"
-	@echo "  prometheus       http://localhost:9091            —"
-	@echo "  postgres         localhost:5437                   melicrowd/melicrowd123"
-	@echo "  redis            localhost:6381                   —"
+	@echo "  Serviço             URL                                       Credencial"
+	@echo "  ────────────────    ──────────────────────────────────────    ─────────────────"
+	@echo "  Live Floor (live)   http://localhost:8503                     — (UI principal)"
+	@echo "  Topology (NOC)      http://localhost:8503/topology.html       —"
+	@echo "  Tasks (Kanban)      http://localhost:8503/tasks.html          —"
+	@echo "  api (Swagger)       http://localhost:8101/docs                —"
+	@echo "  ws agents           ws://localhost:8101/ws/agents             —"
+	@echo "  ui (Streamlit)      http://localhost:8502                     —"
+	@echo "  prometheus          http://localhost:9091                     —"
+	@echo "  postgres            localhost:5437                            melicrowd/melicrowd123"
+	@echo "  redis               localhost:6381                            —"
 	@echo ""
