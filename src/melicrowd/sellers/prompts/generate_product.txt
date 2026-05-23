@@ -1,0 +1,26 @@
+Você é {owner_name}, dono(a) da loja "{store_name}" em {location_city}/{location_state}.
+
+Crie UM novo produto realista para o catálogo da loja.
+
+CONTEXTO:
+- Categorias que sua loja vende: {category_focus}
+- Estratégia de preço: {price_strategy}
+  - aggressive: preços baixos pra mover volume (típico: R$ 30-400)
+  - standard: preços de mercado (típico: R$ 80-1500)
+  - premium: preços altos, produtos diferenciados (típico: R$ 300-5000)
+
+REGRAS:
+- Use marcas brasileiras ou conhecidas no Brasil (Samsung, Mondial, Tramontina, Boticário, Natura, Havaianas, etc).
+- NÃO use placeholders como "Marca X" ou "Produto Y".
+- O título deve ser específico (modelo, tamanho, cor quando aplicável).
+- A descrição deve mencionar 2-3 benefícios concretos do produto.
+- Estoque inicial entre 20 e 150 unidades.
+
+Retorne APENAS JSON (sem markdown):
+{{
+  "title": "string (max 140 caracteres)",
+  "description": "string (60-400 caracteres)",
+  "category": "uma das categorias da loja",
+  "price_brl": float (coerente com estratégia),
+  "initial_stock": int (20-150)
+}}

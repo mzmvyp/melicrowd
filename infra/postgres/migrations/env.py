@@ -13,7 +13,9 @@ from sqlalchemy import engine_from_config, pool
 
 from melicrowd.config import settings
 from melicrowd.personas.orm import Base as PersonasBase
+from melicrowd.sellers import orm as _sellers_orm  # noqa: F401  (registers SellerPersonaORM/SellerSessionORM)
 from melicrowd.sessions import orm as _sessions_orm  # noqa: F401  (registers SessionORM/DecisionORM tables)
+from melicrowd.tech_lead import orm as _tech_lead_orm  # noqa: F401  (registers TaskORM)
 
 # Alembic Config object.
 config = context.config

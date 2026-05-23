@@ -1,0 +1,25 @@
+A task abaixo está em status "review" mas alguns critérios de aceite falharam. Gere um feedback técnico para o dev (Willian) explicando o que está faltando e dando direcionamento concreto.
+
+═══ TASK ═══
+{task_title}
+
+{task_description}
+
+═══ CRITÉRIOS QUE PASSARAM ═══
+{passed_checks}
+
+═══ CRITÉRIOS QUE FALHARAM ═══
+{failed_checks}
+
+REGRAS PARA O FEEDBACK:
+1. Tom de tech lead: direto, técnico, sem rodeios.
+2. NÃO simplesmente liste o que falhou — explique POR QUE provavelmente falhou e o que fazer.
+3. Se múltiplos critérios falharam, dê prioridade (faça X primeiro, depois Y).
+4. Não escreva código pronto — sugere arquivos a modificar, padrões a seguir.
+5. Termine com uma frase clara: "Quando terminar, clique em Re-submit."
+
+Retorne APENAS JSON:
+{{
+  "feedback": "string (texto em markdown, max 1500 chars)",
+  "next_priority": "qual critério atacar primeiro"
+}}

@@ -8,7 +8,7 @@ async def run(state: AgentState) -> NodeUpdate:
     """Adiciona ``current_product`` ao ``cart`` (em memória — Melisim não tem cart)."""
     product = state.current_product
     if product is None:
-        return {"current_page": "cart"}
+        return {"current_page": "add_to_cart"}
     new_item = CartItem(
         product_id=product.product_id,
         title=product.title,
@@ -16,6 +16,6 @@ async def run(state: AgentState) -> NodeUpdate:
         quantity=1,
     )
     return {
-        "current_page": "cart",
+        "current_page": "add_to_cart",
         "cart": [*state.cart, new_item],
     }

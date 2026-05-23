@@ -1,0 +1,154 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "title": "MeliCrowd — NOC (Network Operations)",
+  "uid": "melicrowd-noc",
+  "tags": ["melicrowd", "noc"],
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-15m", "to": "now"},
+  "panels": [
+    {
+      "type": "row",
+      "title": "Topologia — visão geral",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}
+    },
+    {
+      "type": "stat",
+      "title": "Active workers",
+      "gridPos": {"x": 0, "y": 1, "w": 4, "h": 4},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "#3483FA"}, "unit": "short"}},
+      "targets": [{"expr": "melicrowd_active_agents", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Qwen in flight",
+      "gridPos": {"x": 4, "y": 1, "w": 4, "h": 4},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "#A855F7"}, "unit": "short"}},
+      "targets": [{"expr": "melicrowd_qwen_in_flight", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Qwen waiting",
+      "gridPos": {"x": 8, "y": 1, "w": 4, "h": 4},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 10}, {"color": "red", "value": 30}]}, "unit": "short"}},
+      "targets": [{"expr": "melicrowd_qwen_waiting", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Sessions/min",
+      "gridPos": {"x": 12, "y": 1, "w": 4, "h": 4},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "#22C55E"}, "unit": "short"}},
+      "targets": [{"expr": "sum(rate(melicrowd_sessions_started_total[1m])) * 60", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Conversion 1h",
+      "gridPos": {"x": 16, "y": 1, "w": 4, "h": 4},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": 0}, {"color": "yellow", "value": 0.02}, {"color": "green", "value": 0.05}]}, "unit": "percentunit"}},
+      "targets": [{"expr": "sum(rate(melicrowd_sessions_completed_total{outcome=\"purchased\"}[1h])) / clamp_min(sum(rate(melicrowd_sessions_completed_total[1h])), 1)", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Errors 5m",
+      "gridPos": {"x": 20, "y": 1, "w": 4, "h": 4},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]}, "unit": "short"}},
+      "targets": [{"expr": "sum(increase(melicrowd_node_errors_total[5m]))", "refId": "A"}]
+    },
+    {
+      "type": "row",
+      "title": "Per-station — latência",
+      "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}
+    },
+    {
+      "type": "bargauge",
+      "title": "p95 latency por nó (s)",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 9},
+      "fieldConfig": {"defaults": {"color": {"mode": "continuous-GrYlRd"}, "unit": "s", "min": 0}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le, station) (rate(melicrowd_node_duration_seconds_bucket[5m])))",
+        "legendFormat": "{{station}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "bargauge",
+      "title": "Visits/min por nó (taxa)",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 9},
+      "fieldConfig": {"defaults": {"color": {"mode": "continuous-GrYlBl"}, "unit": "short", "min": 0}, "overrides": []},
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true},
+      "targets": [{
+        "expr": "sum by (station) (rate(melicrowd_node_visits_total[5m])) * 60",
+        "legendFormat": "{{station}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "row",
+      "title": "Per-station — ocupação e erros",
+      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 1}
+    },
+    {
+      "type": "timeseries",
+      "title": "Ocupação atual por nó (agents)",
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "stacking": {"mode": "normal"}}}},
+      "targets": [{
+        "expr": "melicrowd_agents_per_state",
+        "legendFormat": "{{state}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Erros por nó (5m rate)",
+      "gridPos": {"x": 12, "y": 16, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}},
+      "targets": [{
+        "expr": "sum by (station, error_type) (rate(melicrowd_node_errors_total[5m])) * 60",
+        "legendFormat": "{{station}} ({{error_type}})",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "row",
+      "title": "Outcomes & Qwen",
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 1}
+    },
+    {
+      "type": "piechart",
+      "title": "Outcome breakdown (1h)",
+      "gridPos": {"x": 0, "y": 25, "w": 8, "h": 9},
+      "targets": [{
+        "expr": "sum by (outcome) (increase(melicrowd_sessions_completed_total[1h]))",
+        "legendFormat": "{{outcome}}",
+        "refId": "A"
+      }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Qwen — latência p50/p95/p99 (s) por nó",
+      "gridPos": {"x": 8, "y": 25, "w": 16, "h": 9},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le, node) (rate(melicrowd_qwen_latency_seconds_bucket[5m])))", "legendFormat": "{{node}} p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le, node) (rate(melicrowd_qwen_latency_seconds_bucket[5m])))", "legendFormat": "{{node}} p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le, node) (rate(melicrowd_qwen_latency_seconds_bucket[5m])))", "legendFormat": "{{node}} p99", "refId": "C"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput — sessões completadas por outcome",
+      "gridPos": {"x": 0, "y": 34, "w": 24, "h": 7},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "lineWidth": 2}}},
+      "targets": [{
+        "expr": "sum by (outcome) (rate(melicrowd_sessions_completed_total[5m])) * 60",
+        "legendFormat": "{{outcome}}",
+        "refId": "A"
+      }]
+    }
+  ]
+}

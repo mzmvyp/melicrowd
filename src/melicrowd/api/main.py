@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -16,6 +17,9 @@ from melicrowd import __version__
 from melicrowd.api.routers import control as control_router
 from melicrowd.api.routers import inspect as inspect_router
 from melicrowd.api.routers import personas as personas_router
+from melicrowd.api.routers import sellers as sellers_router
+from melicrowd.api.routers import tasks as tasks_router
+from melicrowd.api.routers import websocket as websocket_router
 from melicrowd.api.state import get_app_state
 from melicrowd.config import settings
 from melicrowd.db import dispose_engine
@@ -37,6 +41,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     state = get_app_state()
     if state.pool is not None:
         await state.pool.shutdown(timeout=30.0)
+    if state.seller_pool is not None:
+        await state.seller_pool.shutdown(timeout=30.0)
     await get_publisher().stop()
     await dispose_engine()
     logger.bind(module="api.main").info("api shutdown")
@@ -50,9 +56,25 @@ app = FastAPI(
         "- `/start`, `/stop`, `/scale` — controle do pool\n"
         "- `/agents`, `/sessions/{id}`, `/sessions/{id}/replay` — inspeção\n"
         "- `/personas/generate`, `/personas` — geração de personas\n"
+        "- `/ws/agents` — WebSocket com snapshot ao vivo (consumido pelo Live Floor)\n"
         "- `/metrics` — Prometheus"
     ),
     lifespan=_lifespan,
+)
+
+# CORS — Live Floor (porta 8503) e Streamlit (8502) consomem esta API.
+# Em produção, restringir origins. Aqui aceita o range de portas locais usado.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8502",
+        "http://localhost:8503",
+        "http://127.0.0.1:8502",
+        "http://127.0.0.1:8503",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.state.limiter = limiter
@@ -61,6 +83,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 app.include_router(control_router.router)
 app.include_router(inspect_router.router)
 app.include_router(personas_router.router)
+app.include_router(sellers_router.router)
+app.include_router(tasks_router.router)
+app.include_router(websocket_router.router)
 
 
 @app.get("/health", tags=["health"])
@@ -79,6 +104,7 @@ async def status_endpoint() -> dict[str, object]:
             "qwen_max_concurrent": settings.qwen_max_concurrent,
             "default_agent_count": settings.default_agent_count,
             "melisim_gateway_url": settings.melisim_gateway_url,
+            "live_floor_fast_node_delay_seconds": settings.live_floor_fast_node_delay_seconds,
         },
         "pool": {
             "running": pool_running,

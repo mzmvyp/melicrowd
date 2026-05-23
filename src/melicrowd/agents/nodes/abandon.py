@@ -9,4 +9,4 @@ async def run(state: AgentState) -> NodeUpdate:
     outcome = SessionOutcome.ABANDONED_CART if state.cart else SessionOutcome.BROWSED_ONLY
     if not state.viewed_products:
         outcome = SessionOutcome.BOUNCED
-    return {"outcome": outcome, "current_page": "end"}
+    return {"outcome": outcome, "current_page": "abandon"}

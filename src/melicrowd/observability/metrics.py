@@ -104,3 +104,64 @@ agents_per_state: Final = Gauge(
     "Quantidade de agentes em cada nó do grafo.",
     labelnames=("state",),
 )
+
+# -----------------------------------------------------------------------------
+# Métricas por estação (NOC / topology view) — labels: station
+# Cardinalidade controlada: 15 valores fixos (1 por nó do graph.py + waiting_pool).
+# -----------------------------------------------------------------------------
+
+node_visits_total: Final = Counter(
+    "melicrowd_node_visits_total",
+    "Total de visitas a cada nó do grafo (entrada).",
+    labelnames=("station",),
+)
+
+node_duration_seconds: Final = Histogram(
+    "melicrowd_node_duration_seconds",
+    "Duração de execução de um nó individual (entrada → saída).",
+    labelnames=("station",),
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 60),
+)
+
+node_errors_total: Final = Counter(
+    "melicrowd_node_errors_total",
+    "Erros capturados durante execução de um nó.",
+    labelnames=("station", "error_type"),
+)
+
+# -----------------------------------------------------------------------------
+# Sellers (paralelo aos buyers — métricas separadas para o dashboard NOC)
+# -----------------------------------------------------------------------------
+
+seller_sessions_total: Final = Counter(
+    "melicrowd_seller_sessions_total",
+    "Total de sessões de vendedor finalizadas.",
+    labelnames=("outcome",),  # ok | partial | error
+)
+
+seller_actions_total: Final = Counter(
+    "melicrowd_seller_actions_total",
+    "Total de ações executadas por vendedores.",
+    labelnames=("action",),  # restock | suspend | create | update_price
+)
+
+seller_products_created_total: Final = Counter(
+    "melicrowd_seller_products_created_total",
+    "Produtos criados por vendedores (POST /products).",
+)
+
+seller_notifications_received_total: Final = Counter(
+    "melicrowd_seller_notifications_received_total",
+    "Notificações de estoque baixo recebidas por vendedores.",
+)
+
+seller_notifications_responded_total: Final = Counter(
+    "melicrowd_seller_notifications_responded_total",
+    "Notificações respondidas (não ignoradas) por vendedores.",
+    labelnames=("action",),  # restock | suspend
+)
+
+seller_active_workers: Final = Gauge(
+    "melicrowd_seller_active_workers",
+    "Vendedores ativos no pool no momento.",
+)

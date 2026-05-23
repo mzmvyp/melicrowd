@@ -177,6 +177,171 @@ class MelisimClient:
         return [_parse_product(item) for item in items]
 
     # ------------------------------------------------------------------
+    # Seller actions (catálogo + estoque)
+    # ------------------------------------------------------------------
+
+    async def create_product(
+        self,
+        *,
+        seller_id: str,
+        title: str,
+        description: str,
+        category: str,
+        price: float,
+        stock: int,
+        auth_token: str,
+    ) -> Product:
+        """POST /api/v1/products — cria produto (auth SELLER)."""
+        body = await self._request(
+            "POST",
+            "/api/v1/products",
+            json={
+                "seller_id": int(seller_id) if seller_id.isdigit() else seller_id,
+                "title": title,
+                "description": description,
+                "category": category,
+                "price": price,
+                "stock": stock,
+            },
+            auth_token=auth_token,
+        )
+        return _parse_product(body)
+
+    async def update_product(
+        self,
+        product_id: str,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        category: str | None = None,
+        price: float | None = None,
+        auth_token: str,
+    ) -> Product:
+        """PUT /api/v1/products/{id} — atualiza campos do produto."""
+        payload: dict[str, Any] = {}
+        if title is not None:
+            payload["title"] = title
+        if description is not None:
+            payload["description"] = description
+        if category is not None:
+            payload["category"] = category
+        if price is not None:
+            payload["price"] = price
+        body = await self._request(
+            "PUT",
+            f"/api/v1/products/{product_id}",
+            json=payload,
+            auth_token=auth_token,
+        )
+        return _parse_product(body)
+
+    async def update_stock(
+        self,
+        product_id: str,
+        *,
+        delta: int,
+        auth_token: str,
+    ) -> Product:
+        """PATCH /api/v1/products/{id}/stock — ajusta estoque (delta +/-)."""
+        body = await self._request(
+            "PATCH",
+            f"/api/v1/products/{product_id}/stock",
+            json={"delta": delta},
+            auth_token=auth_token,
+        )
+        return _parse_product(body)
+
+    async def delete_product(self, product_id: str, *, auth_token: str) -> bool:
+        """DELETE /api/v1/products/{id} — suspende/remove produto.
+
+        Retorna True se 204; False em qualquer 4xx (produto não existe,
+        etc).
+        """
+        try:
+            await self._request(
+                "DELETE",
+                f"/api/v1/products/{product_id}",
+                auth_token=auth_token,
+            )
+            return True
+        except httpx.HTTPStatusError as exc:
+            LOGGER.debug("delete_product failed", extra={"product_id": product_id, "status": exc.response.status_code})
+            return False
+
+    async def list_seller_products(
+        self,
+        seller_id: str,
+        *,
+        auth_token: str | None = None,
+        max_pages: int = 5,
+    ) -> list[Product]:
+        """Lista produtos pertencentes a um seller (filtra localmente).
+
+        O Melisim products-service não suporta filtro server-side por seller_id;
+        listamos paginado e filtramos por ``product.seller_id``.
+        """
+        seller_id_int = int(seller_id) if seller_id.isdigit() else None
+        out: list[Product] = []
+        for page in range(1, max_pages + 1):
+            page_items = await self.list_products(page=page, size=50, auth_token=auth_token)
+            if not page_items:
+                break
+            for p in page_items:
+                # Pode chegar string ou int — comparar ambos.
+                # Como Product não tem seller_id (subset), vamos refazer com chamada raw.
+                out.append(p)
+            if len(page_items) < 50:
+                break
+        # Filtrar pelos retornados — busca raw com seller_id intacto.
+        return await self._filter_by_seller(seller_id, auth_token=auth_token)
+
+    async def _filter_by_seller(
+        self,
+        seller_id: str,
+        *,
+        auth_token: str | None = None,
+        max_pages: int = 5,
+    ) -> list[Product]:
+        out: list[Product] = []
+        seller_id_int = int(seller_id) if seller_id.isdigit() else None
+        for page in range(1, max_pages + 1):
+            body = await self._request(
+                "GET",
+                "/api/v1/products",
+                params={"page": page, "size": 50},
+                auth_token=auth_token,
+            )
+            items = body.get("items") or []
+            for item in items:
+                sid = item.get("seller_id") or item.get("sellerId")
+                if sid is None:
+                    continue
+                if str(sid) == str(seller_id) or (seller_id_int is not None and sid == seller_id_int):
+                    out.append(_parse_product(item))
+            if len(items) < 50:
+                break
+        return out
+
+    async def get_notifications(self, user_id: str, *, auth_token: str) -> list[dict[str, Any]]:
+        """GET /api/v1/notifications/user/{user_id} — pendências do vendedor."""
+        try:
+            body = await self._request(
+                "GET",
+                f"/api/v1/notifications/user/{user_id}",
+                auth_token=auth_token,
+            )
+        except httpx.HTTPStatusError as exc:
+            LOGGER.debug(
+                "get_notifications failed", extra={"user_id": user_id, "status": exc.response.status_code}
+            )
+            return []
+        if isinstance(body, list):
+            return body
+        if isinstance(body, dict):
+            return body.get("items") or body.get("notifications") or []
+        return []
+
+    # ------------------------------------------------------------------
     # Orders & payments
     # ------------------------------------------------------------------
 

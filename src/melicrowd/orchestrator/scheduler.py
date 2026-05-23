@@ -18,6 +18,7 @@ from melicrowd.config import settings
 from melicrowd.db import get_session_factory
 from melicrowd.execution.kafka_publisher import get_publisher
 from melicrowd.observability.hooks import on_session_completed, on_session_started
+from melicrowd.observability.live_tracker import get_tracker
 from melicrowd.personas.models import Persona
 from melicrowd.personas.repository import PersonaRepository
 from melicrowd.sessions.repository import SessionRepository
@@ -31,8 +32,14 @@ class SessionScheduler:
     def __init__(self) -> None:
         self._sessions_per_persona: dict[UUID, int] = defaultdict(int)
 
-    async def run_one(self) -> AgentState | None:
-        """Executa 1 sessão e persiste tudo. Retorna ``None`` se sem personas."""
+    async def run_one(self, *, worker_id: str | None = None) -> AgentState | None:
+        """Executa 1 sessão e persiste tudo. Retorna ``None`` se sem personas.
+
+        Args:
+            worker_id: identificador estável do worker do pool (ex.: ``agent-007``).
+                Repassado ao runner/tracker para manter o mesmo dot visual
+                no Live Floor entre sessões. Pool faz o ``mark_idle`` depois.
+        """
         persona = await self._pick_persona()
         if persona is None:
             return None
@@ -44,7 +51,7 @@ class SessionScheduler:
         self._sessions_per_persona[persona.persona_id] += 1
 
         try:
-            final_state = await run_session(persona)
+            final_state = await run_session(persona, worker_id=worker_id)
             on_session_started(final_state)
             await publisher.session_started(final_state)
             for record in final_state.decision_trace:
@@ -52,6 +59,12 @@ class SessionScheduler:
             await publisher.session_ended(final_state)
             await self._persist(final_state)
             on_session_completed(final_state)
+            tracker = get_tracker()
+            await tracker.record_completion(
+                final_state.outcome.value if final_state.outcome else "error"
+            )
+            # NÃO remover do tracker aqui: o AgentPool fará ``mark_idle(worker_id)``
+            # entre sessões para preservar o dot visual estável.
             return final_state
         except Exception as exc:  # noqa: BLE001
             LOGGER.exception(

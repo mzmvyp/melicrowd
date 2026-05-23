@@ -19,6 +19,7 @@ from melicrowd.agents.state import AgentState, DecisionRecord
 from melicrowd.llm.qwen_client import generate_json
 from melicrowd.llm.trace import log_decision
 from melicrowd.observability.hooks import on_qwen_call
+from melicrowd.observability.live_tracker import get_tracker
 
 LOGGER: Final = logger.bind(module="agents.qwen_runner")
 
@@ -52,6 +53,22 @@ async def run_qwen_node(
     raw = ""
     parsed: dict[str, Any] | None = None
     latency_ms = 0
+
+    # Pre-Qwen tracker update: estação Qwen pode demorar 1-6s; sem isso,
+    # o Live Floor mostraria o agente parado na estação ANTERIOR durante toda
+    # a chamada (o astream(stream_mode="updates") só emite após o nó terminar).
+    # Update pre-flight com is_thinking=True faz a bolinha aparecer no nó Qwen
+    # com pulse purple imediatamente.
+    try:
+        await get_tracker().upsert_from_state(
+            state,
+            worker_id=state.worker_id,
+            station_override=node_name,
+            is_thinking=True,
+            thinking_progress=0.05,
+        )
+    except Exception:  # noqa: BLE001  — tracker é best-effort
+        pass
 
     try:
         call = await generate_json(prompt)

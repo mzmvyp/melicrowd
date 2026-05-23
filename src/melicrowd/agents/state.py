@@ -87,7 +87,7 @@ class AgentState(BaseModel):
         target_categories: categorias-alvo decididas no início.
         budget_brl: limite de gasto autoimposto pela persona.
         purchase_probability: 0-1, modula transições Markov.
-        current_page: nome do nó atual (rastreio).
+        current_page: id do nó do grafo (ex.: ``browse_home``), alinhado aos quadrantes do Live Floor.
         viewed_products: lista de product_ids vistos.
         search_queries: queries de busca realizadas.
         cart: itens no carrinho local.
@@ -103,6 +103,10 @@ class AgentState(BaseModel):
 
     session_id: UUID = Field(default_factory=uuid4)
     persona: Persona
+    # ID estável do worker do pool (e.g. "agent-007") — propagado pelo runner
+    # para que cada upsert no LiveAgentTracker mantenha o mesmo dot visual
+    # entre sessões. Pode ser None em chamadas standalone (testes).
+    worker_id: str | None = None
     melisim_user_id: str | None = None
     auth_token: str | None = None
 

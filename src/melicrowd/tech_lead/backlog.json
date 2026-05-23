@@ -1,0 +1,142 @@
+{
+  "_comment": "Backlog blueprint — features/melhorias que o Tech Lead Agent pode pickar pra virar task.",
+  "_comment2": "Cada entry NÃO é uma task pronta — é um hint que o LLM expande em task com critérios de aceite.",
+  "_comment3": "target: 'melicrowd' = trabalho no próprio simulador (o que o evaluator consegue checar). 'melisim' = trabalho no sistema sob teste (fora de escopo do auto-evaluator; só passa em revisão manual).",
+  "items": [
+    {
+      "id": "seller-reviews-respond",
+      "target": "melisim",
+      "headline": "Endpoint pra seller responder reviews dos buyers",
+      "rationale": "Sellers hoje não respondem reviews. Marketplace real (ML) tem essa feature. Habilita feedback loop completo.",
+      "suggested_category": "feature",
+      "suggested_priority": "high",
+      "hints": ["POST /api/v1/sellers/{seller_id}/reviews/{review_id}/response", "tabela seller_review_responses", "métrica respondidas/total"]
+    },
+    {
+      "id": "seller-revenue-dashboard",
+      "target": "melicrowd",
+      "headline": "Dashboard de receita por seller no Live Floor",
+      "rationale": "Visibilidade financeira é essencial em marketplace. Mostra concentração de vendas. Frontend e endpoint vivem no MeliCrowd.",
+      "suggested_category": "observability",
+      "suggested_priority": "medium",
+      "hints": ["agregação SQL em melicrowd.sessions/decisions", "endpoint GET /sellers/revenue-summary no api:8101", "render no topology.html"]
+    },
+    {
+      "id": "promo-coupons",
+      "target": "melisim",
+      "headline": "Sistema de cupons de desconto",
+      "rationale": "Sellers premium criam cupons. Buyers usam no checkout. Aumenta conversion.",
+      "suggested_category": "feature",
+      "suggested_priority": "medium",
+      "hints": ["tabela coupons", "POST /sellers/{id}/coupons", "POST /orders com coupon_code", "valida expiry/limits"]
+    },
+    {
+      "id": "stock-update-idempotency",
+      "target": "melisim",
+      "headline": "Idempotência em PATCH /products/{id}/stock",
+      "rationale": "Hoje, retry duplica delta. Em produção isso é bug crítico (inventário negativo).",
+      "suggested_category": "bugfix",
+      "suggested_priority": "critical",
+      "hints": ["header Idempotency-Key", "tabela stock_update_log", "test E2E com retry forçado"]
+    },
+    {
+      "id": "price-history-tracking",
+      "target": "melisim",
+      "headline": "Histórico de mudanças de preço por produto",
+      "rationale": "Compliance + auditoria. Anti-fraude (mudança de preço suspeita antes da venda).",
+      "suggested_category": "observability",
+      "suggested_priority": "medium",
+      "hints": ["tabela price_history", "trigger no update_product", "endpoint GET /products/{id}/price-history"]
+    },
+    {
+      "id": "seller-rate-limit",
+      "target": "melisim",
+      "headline": "Rate limit por seller_id em /products (create + update)",
+      "rationale": "Hoje rate limit é por IP. Seller mal-intencionado com vários IPs spamma catálogo.",
+      "suggested_category": "security",
+      "suggested_priority": "high",
+      "hints": ["middleware FastAPI", "Redis sliding window", "respeitar burst"]
+    },
+    {
+      "id": "events-simulator-schema-versioning",
+      "target": "melicrowd",
+      "headline": "Schema Avro versionado em events.simulator.*",
+      "rationale": "Hoje publica JSON cru. Bronze do datalake quebra quando schema evolui sem aviso. Producer vive no MeliCrowd.",
+      "suggested_category": "refactor",
+      "suggested_priority": "medium",
+      "hints": ["Confluent Schema Registry", "lib confluent-kafka-python no execution/kafka_publisher.py", "BACKWARD compat enforcement", "métrica melicrowd_schema_violations_total"]
+    },
+    {
+      "id": "opentelemetry-tracing",
+      "target": "melicrowd",
+      "headline": "Distributed tracing OpenTelemetry no MeliCrowd",
+      "rationale": "Hoje só Prometheus métricas. Não dá pra correlacionar 1 sessão buyer entre os 14 nós LangGraph e chamadas HTTP ao Melisim.",
+      "suggested_category": "observability",
+      "suggested_priority": "high",
+      "hints": ["opentelemetry-instrumentation-fastapi", "exporter pro Jaeger do Melisim", "trace_id propagado no httpx", "tests/unit/test_tracing.py"]
+    },
+    {
+      "id": "seller-suspended-products-restore",
+      "target": "melisim",
+      "headline": "Endpoint pra restaurar produto suspenso",
+      "rationale": "DELETE /products/{id} hoje é destrutivo. Soft delete + POST /restore preservaria histórico.",
+      "suggested_category": "feature",
+      "suggested_priority": "low",
+      "hints": ["coluna deleted_at", "POST /products/{id}/restore", "filtro is_active na list"]
+    },
+    {
+      "id": "load-test-locustfile",
+      "target": "melicrowd",
+      "headline": "Locust load test de 100 buyers + 10 sellers por 1h documentado",
+      "rationale": "Portfolio precisa de evidência empírica que o sistema sustenta carga. Hoje só rodamos 90s. locustfile vive no MeliCrowd.",
+      "suggested_category": "devx",
+      "suggested_priority": "high",
+      "hints": ["tests/load/locustfile.py", "métricas exportadas em CSV", "doc /docs/load-test-2026-05-XX.md", "snapshot Grafana NOC"]
+    },
+    {
+      "id": "chaos-postgres-outage",
+      "target": "melicrowd",
+      "headline": "Chaos test: matar postgres-melicrowd por 30s mid-flight",
+      "rationale": "Provar que tracker, pool e sessões em vôo recovery sem perda de dados.",
+      "suggested_category": "devx",
+      "suggested_priority": "high",
+      "hints": ["docker stop -t 0 postgres-melicrowd", "tests/chaos/test_postgres_outage.py", "métricas Prometheus continuam sem corrupção"]
+    },
+    {
+      "id": "decision-trace-replay-ui",
+      "target": "melicrowd",
+      "headline": "UI de replay de uma sessão buyer (passo a passo Qwen)",
+      "rationale": "Streamlit já tem placeholder. Implementar de fato e linkar do Live Floor.",
+      "suggested_category": "feature",
+      "suggested_priority": "medium",
+      "hints": ["streamlit_app pages/03_session_replay.py", "timeline horizontal", "prompt+response visível", "endpoint GET /sessions/{id}/replay no api:8101"]
+    },
+    {
+      "id": "auth-token-refresh",
+      "target": "melicrowd",
+      "headline": "Refresh token no MelisimClient quando JWT expira",
+      "rationale": "Sessão buyer/seller longa hoje pode falhar com 401 a partir de certo ponto. MelisimClient vive no MeliCrowd.",
+      "suggested_category": "bugfix",
+      "suggested_priority": "medium",
+      "hints": ["interceptor httpx em execution/melisim_client.py", "renova via /auth/refresh", "tests/unit/test_auth_refresh.py cobre 401 → retry com novo token", "métrica melicrowd_token_refresh_total"]
+    },
+    {
+      "id": "kafka-events-dlq",
+      "target": "melicrowd",
+      "headline": "DLQ próprio do MeliCrowd para events.simulator.*",
+      "rationale": "Quando Kafka down, hoje vai pra log. Deveria ter DLQ local + retry assíncrono.",
+      "suggested_category": "refactor",
+      "suggested_priority": "medium",
+      "hints": ["Redis stream como buffer em melicrowd-redis", "worker re-publica quando Kafka volta", "métrica melicrowd_dlq_depth", "tests/unit/test_kafka_dlq.py"]
+    },
+    {
+      "id": "seller-archetype-from-llm",
+      "target": "melicrowd",
+      "headline": "Geração de seller personas via Qwen (não só synthetic)",
+      "rationale": "Sellers hoje vêm de synthetic. Buyers já têm gerador via Qwen — paridade.",
+      "suggested_category": "feature",
+      "suggested_priority": "low",
+      "hints": ["sellers/generator.py", "prompt persona_seller_v1.txt", "endpoint POST /sellers/generate?count=N no api:8101", "tests/unit/test_seller_generator.py"]
+    }
+  ]
+}

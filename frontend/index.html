@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1280" />
+  <title>MeliCrowd Live Floor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #020617;
+      color: #E2E8F0;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.4); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(71,85,105,0.6); }
+    input[type="range"] { -webkit-appearance: none; height: 4px; border-radius: 2px; background: rgba(71,85,105,0.4); outline: none; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #FFE600; cursor: pointer; border: 2px solid #0F172A; }
+    input[type="checkbox"] { width: 14px; height: 14px; border-radius: 3px; cursor: pointer; }
+    select { appearance: none; -webkit-appearance: none; }
+    button { font-family: inherit; }
+
+    @keyframes qwenPulse {
+      0%, 100% { box-shadow: 0 0 4px 1px rgba(168,85,247,0.4); }
+      50% { box-shadow: 0 0 12px 4px rgba(168,85,247,0.7); }
+    }
+    @keyframes errorBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    @keyframes confettiFall {
+      0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+    }
+
+    /* Subtle grid background */
+    #root::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(51,131,250,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(51,131,250,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- Component scripts -->
+  <script type="text/babel" src="simulation.jsx"></script>
+  <script type="text/babel" src="ui-header.jsx"></script>
+  <script type="text/babel" src="ui-floor.jsx"></script>
+  <script type="text/babel" src="ui-drawer.jsx"></script>
+
+  <script type="text/babel">
+    /**
+     * MeliCrowd Live Floor — Main App
+     *
+     * Design Decisions:
+     * ─────────────────
+     * • Dark theme with slate-950 base, MercadoLivre yellow (#FFE600) and blue (#3483FA) accents
+     * • Glassmorphism on station cards with dynamic glow intensity based on agent count
+     * • Each agent is an individual dot (~12px) colored by persona archetype
+     * • Qwen (LLM) stations have purple accent and pulsing progress bars
+     * • Markov transition matrix mirrors the real LangGraph graph.py edges exactly
+     * • useSimulation() hook is the single data source — swap to WebSocket without UI changes
+     */
+
+    function App() {
+      const sim = useSimulation();
+      const { agents, stations, events, kpis, controls, archetypes, connectionStatus } = sim;
+
+      const [selectedAgent, setSelectedAgent] = React.useState(null);
+      const [followedAgentId, setFollowedAgentId] = React.useState(null);
+      const [filters, setFilters] = React.useState({
+        archetypes: [],
+        intents: [],
+        errorsOnly: false,
+        searchId: '',
+      });
+
+      // Update selected agent data each tick
+      React.useEffect(() => {
+        if (selectedAgent) {
+          const updated = agents.find(a => a.id === selectedAgent.id);
+          if (updated) setSelectedAgent(updated);
+        }
+      }, [agents, selectedAgent?.id]);
+
+      // Confetti easter egg (press C)
+      const [confettiParticles, setConfettiParticles] = React.useState([]);
+      React.useEffect(() => {
+        const handler = (e) => {
+          if (e.key === 'c' || e.key === 'C') {
+            controls.setConfettiMode(prev => !prev);
+          }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+      }, []);
+
+      // Auto-confetti on purchase events
+      React.useEffect(() => {
+        if (!controls.confettiMode) return;
+        const purchaseEvents = events.filter(e => e.type === 'purchased');
+        if (purchaseEvents.length > 0) {
+          const particles = Array.from({ length: 20 }, (_, i) => ({
+            id: `conf-${Date.now()}-${i}`,
+            left: Math.random() * 100,
+            color: ['#FFE600', '#3483FA', '#22C55E', '#A855F7', '#F97316'][Math.floor(Math.random() * 5)],
+            delay: Math.random() * 0.5,
+            duration: 2 + Math.random() * 2,
+          }));
+          setConfettiParticles(prev => [...prev, ...particles].slice(-60));
+          setTimeout(() => setConfettiParticles(prev => prev.slice(20)), 4000);
+        }
+      }, [events, controls.confettiMode]);
+
+      // Tooltip state
+      const [tooltip, setTooltip] = React.useState(null);
+
+      return (
+        <div style={appStyles.root}>
+          {/* Header */}
+          <Header
+            kpis={kpis}
+            controls={controls}
+            connectionStatus={connectionStatus}
+            onSeedPersonas={(n) => controls.seedPersonas(n)}
+          />
+
+          {/* Topology view link (canto superior direito do main) */}
+          <a href="/topology.html" style={appStyles.topologyLink} title="Visão NOC (mapa de dependências + latência por estação)">
+            🗺 Topology / NOC →
+          </a>
+
+          {/* Connection banner */}
+          {connectionStatus !== 'open' && (
+            <div style={appStyles.disconnectedBanner}>
+              <span style={{fontWeight:700,marginRight:6}}>
+                {connectionStatus === 'connecting' ? '⌛ Conectando ao backend...' : '⚠ Backend offline'}
+              </span>
+              <span style={{color:'#94A3B8',fontSize:11}}>
+                Aguardando WebSocket em <code style={{background:'rgba(71,85,105,0.3)',padding:'1px 5px',borderRadius:3}}>{window.WS_URL}</code> — verifique se a API do MeliCrowd está rodando.
+              </span>
+            </div>
+          )}
+
+          {/* Main content area */}
+          <div style={appStyles.main}>
+            {/* Sidebar */}
+            <Sidebar filters={filters} setFilters={setFilters} archetypes={archetypes} />
+
+            {/* Floor plan area */}
+            <div style={appStyles.floorWrapper}>
+              <FloorPlan
+                agents={agents}
+                stations={stations}
+                onAgentClick={setSelectedAgent}
+                filters={filters}
+                showLabels={controls.showLabels}
+              />
+            </div>
+          </div>
+
+          {/* Event Stream Footer */}
+          <EventStream events={events} />
+
+          {/* Agent Drawer */}
+          {selectedAgent && (
+            <AgentDrawer
+              agent={selectedAgent}
+              onClose={() => setSelectedAgent(null)}
+              onFollow={(id) => {
+                setFollowedAgentId(id);
+                setSelectedAgent(null);
+              }}
+            />
+          )}
+
+          {/* Mini Map */}
+          <MiniMap agents={agents} stations={stations} />
+
+          {/* Health Gauge */}
+          <HealthGauge kpis={kpis} />
+
+          {/* Confetti overlay */}
+          {confettiParticles.length > 0 && (
+            <div style={appStyles.confettiContainer}>
+              {confettiParticles.map(p => (
+                <div key={p.id} style={{
+                  position: 'absolute',
+                  left: `${p.left}%`,
+                  top: -10,
+                  width: 6,
+                  height: 6,
+                  background: p.color,
+                  borderRadius: 1,
+                  animation: `confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
+                }}></div>
+              ))}
+            </div>
+          )}
+
+          {/* Followed agent indicator */}
+          {followedAgentId && (() => {
+            const fa = agents.find(a => a.id === followedAgentId);
+            if (!fa) return null;
+            return (
+              <div style={appStyles.followBanner}>
+                <Icon name="Crosshair" size={12} />
+                <span>Following: {fa.persona.name} ({fa.sessionId}) — {fa.station}</span>
+                <button onClick={() => setFollowedAgentId(null)} style={appStyles.followDismiss}>×</button>
+              </div>
+            );
+          })()}
+        </div>
+      );
+    }
+
+    const appStyles = {
+      root: { display:'flex', flexDirection:'column', height:'100vh', width:'100%', position:'relative', zIndex:1 },
+      main: { display:'flex', flex:1, marginTop:56, overflow:'hidden' },
+      floorWrapper: { flex:1, display:'flex', flexDirection:'column', overflow:'hidden' },
+      confettiContainer: { position:'fixed', inset:0, pointerEvents:'none', zIndex:999, overflow:'hidden' },
+      followBanner: { position:'fixed', top:62, left:'50%', transform:'translateX(-50%)', background:'rgba(51,131,250,0.2)', border:'1px solid rgba(51,131,250,0.4)', borderRadius:8, padding:'6px 14px', display:'flex', alignItems:'center', gap:8, fontSize:12, color:'#93C5FD', zIndex:150, backdropFilter:'blur(8px)' },
+      followDismiss: { background:'none', border:'none', color:'#93C5FD', fontSize:16, cursor:'pointer', marginLeft:4 },
+      disconnectedBanner: { position:'fixed', top:56, left:0, right:0, background:'rgba(239,68,68,0.15)', borderBottom:'1px solid rgba(239,68,68,0.3)', color:'#FCA5A5', padding:'6px 16px', fontSize:12, zIndex:90, display:'flex', alignItems:'center', backdropFilter:'blur(8px)' },
+      topologyLink: { position:'fixed', top:64, right:16, fontSize:11, color:'#93C5FD', textDecoration:'none', padding:'6px 12px', background:'rgba(51,131,250,0.2)', border:'1px solid rgba(51,131,250,0.4)', borderRadius:6, zIndex:90, backdropFilter:'blur(8px)', fontWeight:600 },
+    };
+
+    /* ── Render ── */
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

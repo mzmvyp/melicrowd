@@ -22,7 +22,7 @@ async def run(state: AgentState) -> NodeUpdate:
     """Faz signup; só aciona quando intent exige autenticação."""
     if state.session_intent in (SessionIntent.BROWSE, SessionIntent.RESEARCH):
         LOGGER.debug("skipping auth (anonymous browse)", extra={"session_id": str(state.session_id)})
-        return {"current_page": "home"}
+        return {"current_page": "auth"}
 
     client = get_client()
     p = state.persona
@@ -37,5 +37,5 @@ async def run(state: AgentState) -> NodeUpdate:
     return {
         "melisim_user_id": result.user_id,
         "auth_token": result.access_token,
-        "current_page": "home",
+        "current_page": "auth",
     }

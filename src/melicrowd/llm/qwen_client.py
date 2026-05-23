@@ -93,7 +93,17 @@ async def _call_ollama(prompt: str, *, timeout: float) -> str:
         "prompt": prompt,
         "stream": False,
         "format": "json",
-        "options": {"temperature": 0.7, "num_ctx": 8192},
+        # CRÍTICO: Qwen 3 vem com thinking mode ON por default. Com format=json
+        # e num_predict=256 limitado, o thinking consome o budget de tokens
+        # ANTES do JSON real, retornando "{}" vazio. Pydantic falha → todo
+        # agente cai no fallback procedural. Bench mostrou: think=true → 2
+        # tokens (`{}`); think=false → 58 tokens (JSON completo, ~1.7s).
+        "think": settings.qwen_thinking_enabled,
+        "options": {
+            "temperature": settings.qwen_temperature,
+            "num_predict": settings.qwen_max_output_tokens,
+            "num_ctx": 4096,  # JSON pequeno, contexto não precisa ser 8k
+        },
     }
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(

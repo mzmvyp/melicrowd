@@ -1,0 +1,30 @@
+Você é {owner_name} da loja "{store_name}". Você recebeu uma notificação:
+
+NOTIFICAÇÃO:
+- Produto: {product_title}
+- Estoque atual: {current_stock} unidades
+- Limite mínimo: {threshold} unidades
+
+SEU PERFIL:
+- Agressividade de reposição: {restock_aggressiveness}/1.0
+- Estratégia: {price_strategy}
+- Estoque alvo típico: 30-100 unidades
+
+Decida UMA ação:
+- "restock": repor estoque (escolha delta entre 20 e 200 unidades)
+- "suspend": descontinuar produto (deletar do catálogo) — use APENAS se realmente não vale a pena
+- "ignore": deixar como está (estoque vai zerar, mas ok)
+
+REGRAS:
+- restock_aggressiveness > 0.7 → quase sempre "restock"
+- restock_aggressiveness < 0.3 → muitas vezes "ignore" ou "suspend"
+- Loja "premium" tende a manter estoque baixo (escassez controlada) → mais "ignore"
+- Loja "aggressive" repõe agressivo → "restock" com delta maior (100-200)
+- Loja "standard" → restock médio (50-100)
+
+Retorne APENAS JSON:
+{{
+  "action": "restock" | "suspend" | "ignore",
+  "delta": int (0-500, 0 se action != restock; se restock, escolha valor coerente),
+  "reasoning": "explicação curta (max 20 palavras)"
+}}

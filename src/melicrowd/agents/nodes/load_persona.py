@@ -26,7 +26,7 @@ async def run(state: AgentState) -> NodeUpdate:
         },
     )
     return {
-        "current_page": "home",
+        "current_page": "load_persona",
         "started_at": datetime.now(timezone.utc),
         "last_action_at": datetime.now(timezone.utc),
     }

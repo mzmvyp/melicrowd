@@ -1,9 +1,8 @@
 """QwenPool — limite de chamadas concorrentes ao Qwen via async semaphore.
 
-Por que limitar: Qwen 14B em Ollama local satura com mais de 4 chamadas
-simultâneas — latência p99 explode e o agente espera mais do que se tivesse
-ficado em fila ordenada. O semaphore aumenta latência média *previsivelmente*
-mas mantém p99 estável.
+Por que limitar: Qwen 14B em Ollama local satura se ``qwen_max_concurrent``
+for alto demais para o GPU — latência p99 explode. O default em ``settings``
+(12) é um meio-termo; tune via ``MELICROWD_QWEN_MAX_CONCURRENT``.
 
 Singleton process-wide: criado pelo lifespan do FastAPI e/ou orchestrator
 e reutilizado por todos os agentes.
@@ -35,7 +34,7 @@ class QwenPool:
 
         Args:
             max_concurrent: limite de chamadas concorrentes.
-                Default: ``settings.qwen_max_concurrent`` (4).
+                Default: ``settings.qwen_max_concurrent``.
         """
         self.max_concurrent: int = max_concurrent or settings.qwen_max_concurrent
         self._semaphore = asyncio.Semaphore(self.max_concurrent)
@@ -75,10 +74,16 @@ class QwenPool:
         """
         async with self._lock:
             self._waiting += 1
+        # Só podemos decrementar ``_waiting`` no ``except`` se ainda não entramos
+        # no semáforo. Caso contrário, ao cancelar uma task *dentro* do ``yield``,
+        # ``_waiting`` pode ser > 0 por **outras** tasks na fila — decrementar aqui
+        # rouba o contador delas e ``qwen_waiting`` no /pool vira negativo.
+        entered_semaphore = False
         try:
             async with self._semaphore:
                 async with self._lock:
                     self._waiting -= 1
+                    entered_semaphore = True
                     self._in_flight += 1
                 try:
                     yield
@@ -87,8 +92,7 @@ class QwenPool:
                         self._in_flight -= 1
         except BaseException:
             async with self._lock:
-                # Se o cancelamento aconteceu enquanto esperava, decrementar waiting.
-                if self._waiting > 0:
+                if not entered_semaphore and self._waiting > 0:
                     self._waiting -= 1
             raise
 

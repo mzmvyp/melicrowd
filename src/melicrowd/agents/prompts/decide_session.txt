@@ -15,13 +15,17 @@ CONTEXTO ATUAL:
 
 Decida sua INTENÇÃO MACRO ao acessar o e-commerce agora. Seja realista — humano normalmente NÃO entra com intenção de comprar; entra mais pra navegar, comparar, pesquisar.
 
-Distribuição esperada (calibrada com benchmarks de e-commerce BR):
-- browse (passeando, sem alvo): 40%
-- research (pesquisando algo específico): 30%
-- compare (decidido a comprar mas comparando): 20%
-- purchase (decidido a comprar AGORA): 10%
+Distribuição esperada (calibrada com benchmarks de e-commerce BR e ajustada
+para dar conversion realista de portfólio — ~25-40% chegando ao checkout):
+- browse (passeando, sem alvo): 25%
+- research (pesquisando algo específico): 25%
+- compare (decidido a comprar mas comparando): 25%
+- purchase (decidido a comprar AGORA): 25%
 
-Escolha COERENTE com sua persona — pessoa muito digital que visita 7x por semana provavelmente está em "browse" ou "research"; pessoa que visita 1x por semana e tem alto purchase_drivers probabilmente é "purchase".
+Escolha COERENTE com sua persona — pessoa muito digital que visita 7x por semana
+PODE estar em qualquer um dos 4 (variedade de motivos). Pessoa que visita 1x por
+semana e tem alto purchase_drivers tende a "purchase" ou "compare". NÃO assuma
+que browse é o default — humano vai ao e-commerce com objetivo na maioria das vezes.
 
 Retorne APENAS JSON (sem markdown, sem texto antes/depois):
 {{

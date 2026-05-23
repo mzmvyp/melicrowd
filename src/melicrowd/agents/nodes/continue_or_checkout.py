@@ -22,4 +22,5 @@ async def run(state: AgentState) -> NodeUpdate:
         base_continue *= 0.3  # quase sempre vai pra checkout
 
     next_step = "continue" if random.random() < base_continue else "checkout"
-    return {"current_page": next_step, "last_continue_decision": next_step}
+    # current_page alinhado ao id do nó (Live Floor agrupa por id do quadrante).
+    return {"current_page": "continue_or_checkout", "last_continue_decision": next_step}

@@ -1,0 +1,79 @@
+Você precisa gerar UMA task técnica detalhada baseada na ideia abaixo do backlog:
+
+═══ IDEIA DO BACKLOG ═══
+ID: {item_id}
+Headline: {headline}
+Rationale (por que isso importa): {rationale}
+Categoria sugerida: {suggested_category}
+Prioridade sugerida: {suggested_priority}
+Hints técnicos: {hints}
+═══════════════════════
+
+Contexto adicional:
+- Stack do projeto: Python 3.11, FastAPI em :8101, Postgres em :5437 (db melicrowd, schema melicrowd, user/senha melicrowd/melicrowd123), Prometheus em /metrics, asyncpg, SQLAlchemy 2.x, Pydantic v2.
+- O dev (Willian) tem ~15 anos de experiência mas está provando senioridade. Não simplifique demais a task.
+- O sistema tem 2 tipos de agentes (buyer/seller) já rodando em pools assíncronos.
+
+REGRA CRÍTICA DE ESCOPO (não viole sob hipótese alguma):
+Todos os critérios de aceite têm que ser verificáveis DENTRO do MeliCrowd —
+o evaluator só consegue checar:
+  - Postgres melicrowd (host postgres-melicrowd, schema melicrowd)
+  - http://api:8101 (FastAPI control plane do MeliCrowd: /openapi.json, /metrics)
+  - repo do MeliCrowd (git log e pytest contra arquivos sob src/melicrowd/ ou tests/)
+  - métricas com prefixo melicrowd_* (NÃO use melisim_*, melisimlake_*, etc)
+
+NUNCA gere critérios apontando para o MeliSim (api-gateway :18000, schema public,
+melisim-postgres, métrica melisim_*) — esses sistemas são VIZINHOS, não modificados
+pelo MeliCrowd. Se a ideia do backlog parecer envolver o MeliSim, reescreva-a como
+trabalho do lado MeliCrowd (ex.: em vez de "criar endpoint no MeliSim", proponha
+"adicionar wrapper / cliente / métrica / teste no MeliCrowd que consome o endpoint
+existente do MeliSim"). Endpoint, tabela e métrica devem viver dentro do MeliCrowd.
+
+REGRAS PARA A TASK:
+1. Title em português (max 80 chars), direto e específico.
+2. Description em markdown, com 3 seções:
+   - "Contexto" (problema/oportunidade)
+   - "Implementação esperada" (alto nível, não código pronto)
+   - "Notas técnicas" (gotchas, padrões a seguir)
+3. SLA em horas (8-48 dependendo do escopo).
+4. Acceptance criteria — MUITO IMPORTANTE: cada check tem que ser EXECUTÁVEL automaticamente pelo evaluator. Tipos disponíveis:
+
+   - kind="http": testa endpoint
+     {{"kind": "http", "description": "endpoint X responde 200",
+       "method": "GET|POST|PUT|PATCH|DELETE", "url": "http://api:8101/...",
+       "expected_status": 200, "response_contains": "opcional substring",
+       "request_body": null OU dict}}
+
+   - kind="db": query Postgres no MeliCrowd
+     {{"kind": "db", "description": "tabela X existe", "query": "SELECT to_regclass('melicrowd.minha_tabela')",
+       "expect_min_rows": 1, "expect_value": "opcional valor exato esperado"}}
+
+   - kind="metric": métrica Prometheus
+     {{"kind": "metric", "description": "métrica X registra Y", "metric_name": "melicrowd_xxx_total",
+       "metric_min_value": 0}}
+
+   - kind="git": padrão em commits ou existência de arquivo
+     {{"kind": "git", "description": "commit menciona feat(reviews)", "git_pattern": "feat\\\\(reviews\\\\)"}}
+     OU {{"kind": "git", "description": "arquivo existe", "git_file_exists": "src/melicrowd/reviews/models.py"}}
+
+   - kind="test": pytest passa
+     {{"kind": "test", "description": "testes unit passam", "pytest_path": "tests/unit/test_reviews.py"}}
+
+   - kind="endpoint_exists": rota registrada no OpenAPI
+     {{"kind": "endpoint_exists", "description": "endpoint registrado",
+       "openapi_method": "POST", "openapi_path": "/sellers/{{seller_id}}/reviews/{{review_id}}/response"}}
+
+5. Use 3-7 critérios de aceite. Sempre comece pela existência de arquivo/endpoint, depois HTTP/DB, depois métrica/teste.
+6. Tags: 2-5 strings que ajudam categorizar.
+
+Retorne APENAS JSON válido (sem markdown, sem texto antes/depois), respeitando este schema:
+
+{{
+  "title": "string",
+  "description": "string em markdown",
+  "category": "feature|bugfix|refactor|security|observability|devx|docs",
+  "priority": "low|medium|high|critical",
+  "sla_hours": int,
+  "acceptance_criteria": [ ... lista de checks ... ],
+  "tags": ["...", "..."]
+}}

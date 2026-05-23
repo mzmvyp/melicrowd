@@ -14,7 +14,8 @@ from melicrowd.config import Settings
 def test_settings_loads_with_defaults() -> None:
     s = Settings()
     assert s.qwen_model == "qwen3:14b"
-    assert s.qwen_max_concurrent == 4
+    assert s.qwen_max_concurrent == 12
+    assert s.orchestrator_autostart is True
     assert s.default_agent_count == 50
     assert s.api_port == 8101
     assert s.prometheus_metrics_port == 9091

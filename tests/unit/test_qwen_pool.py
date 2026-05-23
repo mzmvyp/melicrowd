@@ -47,3 +47,38 @@ async def test_pool_releases_on_exception() -> None:
 
     assert pool.in_flight == 0
     assert pool.waiting == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_holding_slot_does_not_make_waiting_negative() -> None:
+    """Cancelamento da task que já pegou vaga não deve decrementar _waiting global.
+
+    Bug antigo: ``except BaseException`` fazia ``if _waiting > 0: _waiting -= 1``
+    mesmo quando a task já tinha saído da fila ao entrar no semáforo. Se outra
+    task estava esperando, o contador ia para -1 (ou pior sob carga).
+    """
+    pool = QwenPool(max_concurrent=1)
+    holder_ready = asyncio.Event()
+
+    async def holder() -> None:
+        async with pool.acquire():
+            holder_ready.set()
+            await asyncio.sleep(60)
+
+    async def waiter() -> None:
+        async with pool.acquire():
+            pass
+
+    h = asyncio.create_task(holder())
+    await asyncio.wait_for(holder_ready.wait(), timeout=2.0)
+    w = asyncio.create_task(waiter())
+    await asyncio.sleep(0.05)
+    assert pool.waiting >= 1
+
+    h.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await h
+
+    await asyncio.wait_for(w, timeout=2.0)
+    assert pool.waiting == 0
+    assert pool.in_flight == 0

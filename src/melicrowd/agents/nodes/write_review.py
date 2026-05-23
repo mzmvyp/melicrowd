@@ -57,4 +57,4 @@ async def run(state: AgentState) -> NodeUpdate:
         response_model=WriteReviewResponse,
         fallback=_fallback,
     )
-    return {"current_page": "review_written"}
+    return {"current_page": "write_review"}

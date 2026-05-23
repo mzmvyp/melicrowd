@@ -33,11 +33,20 @@ def _fallback(state: AgentState) -> DecideSessionResponse:
     else:
         intent = random.choice(["research", "compare"])
 
+    # Budget realista por intent. Antes era 100-1500 — produto stub custa
+    # até R$ 3500, então budget pequeno sempre dava over_budget e o agente
+    # nunca chegava no checkout. Subindo o range pra cobrir o catálogo.
+    budget = None
+    if intent == "purchase":
+        budget = round(random.uniform(500, 4000), 2)
+    elif intent in ("research", "compare"):
+        budget = round(random.uniform(300, 2500), 2)
+
     return DecideSessionResponse(
         session_intent=intent,
         target_categories=p.preferred_categories[:2],
-        budget_brl=None if intent == "browse" else round(random.uniform(100, 1500), 2),
-        purchase_probability=0.5 if intent == "purchase" else 0.15,
+        budget_brl=budget,
+        purchase_probability=0.65 if intent == "purchase" else 0.25 if intent == "compare" else 0.12,
         reasoning="fallback procedural",
     )
 
@@ -88,4 +97,5 @@ async def run(state: AgentState) -> NodeUpdate:
         "target_categories": response.target_categories,
         "budget_brl": response.budget_brl,
         "purchase_probability": response.purchase_probability,
+        "current_page": "decide_session",
     }

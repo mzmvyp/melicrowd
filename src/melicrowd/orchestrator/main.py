@@ -25,21 +25,37 @@ LOGGER: Final = logger.bind(module="orchestrator.main")
 
 
 async def _run() -> None:
-    LOGGER.info("orchestrator starting", extra={"target_agents": settings.default_agent_count})
+    LOGGER.info(
+        "orchestrator starting",
+        extra={
+            "target_agents": settings.default_agent_count,
+            "autostart_pool": settings.orchestrator_autostart,
+        },
+    )
 
     publisher = get_publisher()
     await publisher.start()
 
-    pool = AgentPool()
     shutdown_event = asyncio.Event()
     install_signal_handlers(shutdown_event)
-    await pool.start()
+    pool: AgentPool | None = None
+
+    if settings.orchestrator_autostart:
+        pool = AgentPool()
+        await pool.start()
+        LOGGER.info("orchestrator pool started (in-process)")
+    else:
+        LOGGER.warning(
+            "orchestrator autostart disabled — no AgentPool in this process. "
+            "Use POST /start on the API for Live Floor (WS /ws/agents vê só o pool da API).",
+        )
 
     LOGGER.info("orchestrator running — waiting for shutdown signal")
     await shutdown_event.wait()
 
     LOGGER.info("orchestrator draining")
-    await pool.shutdown(timeout=30.0)
+    if pool is not None:
+        await pool.shutdown(timeout=30.0)
     await publisher.stop()
     LOGGER.info("orchestrator stopped cleanly")
 

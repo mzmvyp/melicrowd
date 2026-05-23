@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1280" />
+  <title>MeliCrowd — Topology (NOC)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #020617;
+      color: #E2E8F0;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.4); border-radius: 3px; }
+    @keyframes errorPulse {
+      0%, 100% { box-shadow: 0 0 6px 2px rgba(239,68,68,0.6); }
+      50% { box-shadow: 0 0 14px 5px rgba(239,68,68,0.9); }
+    }
+    @keyframes flowDash {
+      to { stroke-dashoffset: -24; }
+    }
+    @keyframes nodePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.8; }
+    }
+    .edge-hot {
+      animation: flowDash 0.9s linear infinite;
+    }
+    .edge-warm {
+      animation: flowDash 2.5s linear infinite;
+    }
+    .node-active {
+      animation: nodePulse 1.8s ease-in-out infinite;
+    }
+    #root::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(51,131,250,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(51,131,250,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="simulation.jsx"></script>
+
+  <script type="text/babel">
+    /**
+     * MeliCrowd — Topology view (NOC style).
+     *
+     * Visão "Network Operations Center" do grafo LangGraph:
+     * - 15 estações desenhadas como DAG estático (SVG).
+     * - Arestas espelham edges.py + graph.py.
+     * - Cor/borda de cada nó deriva do nodeStats do snapshot WS:
+     *     fill         → ocupação (heat 0-100% baseado em max stationLoad)
+     *     border       → p95 latency (verde <500ms, amarelo <2s, vermelho >2s)
+     *     pulse vermelho → errorsPerMin > 0
+     *     badge       → visitsPerMin (taxa de passagem)
+     *
+     * Não mostra dots individuais — pra isso use index.html (Live Floor).
+     */
+
+    const STATION_GRID = {
+      // Row 0 — Entry (4)
+      waiting_pool:   { row: 0, col: 0, label: 'Waiting Pool', kind: 'pool' },
+      load_persona:   { row: 0, col: 1, label: 'Load Persona', kind: 'proc' },
+      decide_session: { row: 0, col: 2, label: 'Decide Session', kind: 'qwen' },
+      auth:           { row: 0, col: 3, label: 'Auth', kind: 'proc' },
+      // Row 1 — Navigation (5)
+      browse_home:    { row: 1, col: 0, label: 'Home', kind: 'proc' },
+      search:         { row: 1, col: 1, label: 'Search', kind: 'http' },
+      product_list:   { row: 1, col: 2, label: 'Product List', kind: 'proc' },
+      product_detail: { row: 1, col: 3, label: 'Product Detail', kind: 'http' },
+      evaluate_item:  { row: 1, col: 4, label: 'Evaluate Item', kind: 'qwen' },
+      // Row 2 — Conversion (7)
+      add_to_cart:          { row: 2, col: 0, label: 'Add to Cart', kind: 'proc' },
+      continue_or_checkout: { row: 2, col: 1, label: 'Continue?', kind: 'proc' },
+      checkout_decision:    { row: 2, col: 2, label: 'Checkout Decision', kind: 'qwen' },
+      pay:                  { row: 2, col: 3, label: 'Pay', kind: 'http' },
+      write_review:         { row: 2, col: 4, label: 'Write Review', kind: 'qwen' },
+      abandon:              { row: 2, col: 5, label: 'Abandoned', kind: 'terminal-bad' },
+      purchased:            { row: 2, col: 6, label: 'Purchased', kind: 'terminal-good' },
+      // Row 3 — Seller Setup (5) — laranja
+      seller_idle:                { row: 3, col: 0, label: 'Seller Idle',     kind: 'seller-pool' },
+      seller_login:               { row: 3, col: 1, label: 'Login',           kind: 'seller-proc' },
+      seller_audit:               { row: 3, col: 2, label: 'Audit Inventory', kind: 'seller-http' },
+      seller_check_notifications: { row: 3, col: 3, label: 'Check Alerts',    kind: 'seller-http' },
+      seller_decide:              { row: 3, col: 4, label: 'Decide Focus',    kind: 'seller-qwen' },
+      // Row 4 — Seller Actions (5)
+      seller_restock:        { row: 4, col: 0, label: 'Restock',        kind: 'seller-http' },
+      seller_suspend:        { row: 4, col: 1, label: 'Suspend',        kind: 'seller-http' },
+      seller_create_product: { row: 4, col: 2, label: 'Create Product', kind: 'seller-qwen' },
+      seller_update_price:   { row: 4, col: 3, label: 'Update Price',   kind: 'seller-http' },
+      seller_done:           { row: 4, col: 4, label: 'Done',           kind: 'seller-terminal' },
+    };
+
+    // Arestas: espelham edges.py + graph.py
+    const EDGES = [
+      // ── Buyer flow ──
+      ['waiting_pool', 'load_persona'],
+      ['load_persona', 'decide_session'],
+      ['decide_session', 'auth'],
+      ['decide_session', 'abandon'],
+      ['auth', 'browse_home'],
+      ['browse_home', 'search'],
+      ['search', 'product_list'],
+      ['product_list', 'product_detail'],
+      ['product_detail', 'evaluate_item'],
+      ['evaluate_item', 'add_to_cart'],
+      ['evaluate_item', 'product_list'],
+      ['evaluate_item', 'abandon'],
+      ['add_to_cart', 'continue_or_checkout'],
+      ['continue_or_checkout', 'search'],
+      ['continue_or_checkout', 'checkout_decision'],
+      ['checkout_decision', 'pay'],
+      ['checkout_decision', 'abandon'],
+      ['pay', 'write_review'],
+      ['pay', 'purchased'],
+      ['write_review', 'purchased'],
+      // ── Seller flow ──
+      ['seller_idle', 'seller_login'],
+      ['seller_login', 'seller_audit'],
+      ['seller_audit', 'seller_check_notifications'],
+      ['seller_check_notifications', 'seller_decide'],
+      // Decide fans out to 4 actions
+      ['seller_decide', 'seller_restock'],
+      ['seller_decide', 'seller_suspend'],
+      ['seller_decide', 'seller_create_product'],
+      ['seller_decide', 'seller_update_price'],
+      // Actions converge in done
+      ['seller_restock', 'seller_done'],
+      ['seller_suspend', 'seller_done'],
+      ['seller_create_product', 'seller_done'],
+      ['seller_update_price', 'seller_done'],
+      ['seller_done', 'seller_idle'],  // ciclo (cooldown e volta)
+    ];
+
+    const NODE_W = 160;
+    const NODE_H = 70;
+    const COL_GAP = 60;
+    const ROW_GAP = 100;
+    const PAD = 40;
+
+    function nodePos(id) {
+      const grid = STATION_GRID[id];
+      if (!grid) return { x: 0, y: 0 };
+      return {
+        x: PAD + grid.col * (NODE_W + COL_GAP),
+        y: PAD + grid.row * (NODE_H + ROW_GAP),
+      };
+    }
+
+    // Heat = max(ocupação atual normalizada, visitsPerMin normalizada × 0.7).
+    // Sem visitsPerMin, nós procedurais curtos ficam "frios" mesmo quando passa
+    // tráfego — porque a probabilidade de ter alguém PARADO num nó de 200ms é
+    // baixa. visitsPerMin captura o tráfego real, não só o snapshot atual.
+    function getNodeColor(kind, occupancy, maxOccupancy, visitsPerMin, maxVisits, p95Ms, hasErrors) {
+      if (kind === 'terminal-good') return { fill: 'rgba(34,197,94,0.25)', stroke: '#22C55E', heat: 1 };
+      if (kind === 'terminal-bad') return { fill: 'rgba(249,115,22,0.18)', stroke: '#F97316', heat: 1 };
+      if (kind === 'seller-terminal') return { fill: 'rgba(249,115,22,0.22)', stroke: '#F97316', heat: 1 };
+
+      const occIntensity = maxOccupancy > 0 ? Math.min(occupancy / maxOccupancy, 1) : 0;
+      const flowIntensity = maxVisits > 0 ? Math.min(visitsPerMin / maxVisits, 1) : 0;
+      const heat = Math.max(occIntensity, flowIntensity * 0.7);
+      const baseAlpha = 0.12 + heat * 0.55;
+
+      let fill;
+      if (kind === 'qwen') fill = `rgba(168,85,247,${baseAlpha})`;
+      else if (kind === 'http') fill = `rgba(51,131,250,${baseAlpha})`;
+      else if (kind === 'pool') fill = `rgba(100,116,139,${baseAlpha})`;
+      // Sellers — tonalidade laranja (Mercado Livre brand fit)
+      else if (kind === 'seller-qwen') fill = `rgba(249,115,22,${baseAlpha + 0.05})`;
+      else if (kind === 'seller-http') fill = `rgba(249,115,22,${baseAlpha})`;
+      else if (kind === 'seller-proc') fill = `rgba(249,115,22,${baseAlpha * 0.7})`;
+      else if (kind === 'seller-pool') fill = `rgba(100,116,139,${baseAlpha * 0.7})`;
+      else fill = `rgba(71,85,105,${baseAlpha})`;
+
+      let stroke = heat > 0.05 ? 'rgba(100,116,139,0.7)' : 'rgba(71,85,105,0.4)';
+      if (p95Ms > 0) {
+        if (p95Ms < 500) stroke = '#22C55E';
+        else if (p95Ms < 2000) stroke = '#FACC15';
+        else stroke = '#EF4444';
+      }
+      if (hasErrors) stroke = '#EF4444';
+
+      return { fill, stroke, heat };
+    }
+
+    function fmtLatency(ms) {
+      if (!ms || ms === 0) return '—';
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    }
+
+    function App() {
+      const sim = useSimulation();
+      const { agents, kpis, connectionStatus, controls } = sim;
+      const nodeStats = sim.nodeStats || {};
+
+      // Ocupação atual derivada do agents (não confiar só em nodeStats.occupancy,
+      // que pode estar atrasado).
+      const occupancy = React.useMemo(() => {
+        const map = {};
+        Object.keys(STATION_GRID).forEach(k => { map[k] = 0; });
+        agents.forEach(a => {
+          if (map[a.station] !== undefined) map[a.station]++;
+        });
+        return map;
+      }, [agents]);
+      const maxOccupancy = Math.max(1, ...Object.values(occupancy));
+      const maxVisitsPerMin = Math.max(1, ...Object.values(nodeStats).map(s => s.visitsPerMin || 0));
+
+      // Stage selecionado para drill-down
+      const [selectedStation, setSelectedStation] = React.useState(null);
+
+      // SVG bounds
+      const maxCol = Math.max(...Object.values(STATION_GRID).map(g => g.col));
+      const maxRow = Math.max(...Object.values(STATION_GRID).map(g => g.row));
+      const svgWidth = PAD * 2 + (maxCol + 1) * NODE_W + maxCol * COL_GAP;
+      const svgHeight = PAD * 2 + (maxRow + 1) * NODE_H + maxRow * ROW_GAP;
+
+      const wsBadge = connectionStatus === 'open' ? { c: '#22C55E', l: 'LIVE' }
+                    : connectionStatus === 'connecting' ? { c: '#FACC15', l: 'CONNECTING' }
+                    : { c: '#EF4444', l: 'OFFLINE' };
+
+      return (
+        <div style={{display:'flex',flexDirection:'column',height:'100vh',width:'100%',position:'relative',zIndex:1}}>
+          {/* Header */}
+          <header style={hdrStyles.container}>
+            <div style={hdrStyles.left}>
+              <span style={hdrStyles.logoIcon}>⚡</span>
+              <span style={hdrStyles.logoText}>MeliCrowd</span>
+              <span style={hdrStyles.logoSub}>Topology · NOC</span>
+            </div>
+
+            <div style={hdrStyles.kpiRow}>
+              <KPI label="WORKERS" value={kpis.totalWorkers || 0} c="#3483FA" />
+              <KPI label="BUSY" value={kpis.busyWorkers || 0} c="#22C55E" />
+              <KPI label="IDLE" value={kpis.idleWorkers || 0} c="#64748B" />
+              <KPI label="UTIL" value={(kpis.utilization || '0') + '%'} c="#A855F7" />
+              <KPI label="SESS/MIN" value={kpis.sessionsPerMin || 0} c="#22C55E" />
+              <KPI label="QWEN/MIN" value={kpis.qwenCallsPerMin || 0} c="#A855F7" />
+              <KPI label="P95 QWEN" value={(kpis.p95QwenLatency || '0') + 's'} c="#FACC15" />
+              <KPI label="ERR 5M" value={kpis.errorsLast5Min || 0} c={kpis.errorsLast5Min > 5 ? '#EF4444' : '#64748B'} />
+              <KPI label="SELLERS" value={`${kpis.sellerBusyWorkers || 0}/${kpis.sellerTotalWorkers || 0}`} c="#F97316" />
+              <KPI label="SELLER/MIN" value={kpis.sellerSessionsPerMin || 0} c="#F97316" />
+            </div>
+
+            <div style={hdrStyles.right}>
+              <a href="/" style={hdrStyles.link}>← Live Floor</a>
+              <span style={{...hdrStyles.wsBadge, background:`${wsBadge.c}22`, border:`1px solid ${wsBadge.c}66`, color: wsBadge.c}}>
+                <span style={{...hdrStyles.wsDot, background: wsBadge.c}}></span>
+                {wsBadge.l}
+              </span>
+            </div>
+          </header>
+
+          {/* Connection banner */}
+          {connectionStatus !== 'open' && (
+            <div style={hdrStyles.banner}>
+              <span style={{fontWeight:700,marginRight:6}}>
+                {connectionStatus === 'connecting' ? '⌛ Conectando...' : '⚠ Backend offline'}
+              </span>
+              <span style={{color:'#94A3B8',fontSize:11}}>Sem dados em tempo real.</span>
+            </div>
+          )}
+
+          {/* SVG topology */}
+          <div style={{flex:1,overflow:'auto',padding:16,marginTop:56}}>
+            <svg width={svgWidth} height={svgHeight} style={{display:'block',margin:'0 auto'}}>
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(100,116,139,0.5)"/>
+                </marker>
+                <marker id="arrow-busy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#3483FA"/>
+                </marker>
+              </defs>
+
+              {/* Edges — "hot" considera tráfego (visitsPerMin) E ocupação.
+                  Antes, exigia occupancy>0 nos dois lados, então nós procedurais
+                  curtos (<500ms) raramente cumpriam isso e a aresta ficava fria.
+                  Agora visitsPerMin>0 nos últimos 60s já basta para acender. */}
+              {EDGES.map(([from, to], i) => {
+                const a = nodePos(from);
+                const b = nodePos(to);
+                const ax = a.x + NODE_W / 2;
+                const ay = a.y + NODE_H;
+                const bx = b.x + NODE_W / 2;
+                const by = b.y;
+
+                const fromVisits = (nodeStats[from] || {}).visitsPerMin || 0;
+                const toVisits = (nodeStats[to] || {}).visitsPerMin || 0;
+                const fromActive = fromVisits > 0 || (occupancy[from] || 0) > 0;
+                const toActive = toVisits > 0 || (occupancy[to] || 0) > 0;
+                const isHot = fromActive && toActive;
+                const isWarm = !isHot && (fromActive || toActive);
+
+                const cy = (ay + by) / 2;
+                const path = `M ${ax} ${ay} C ${ax} ${cy}, ${bx} ${cy}, ${bx} ${by}`;
+                const stroke = isHot ? '#3483FA' : isWarm ? 'rgba(51,131,250,0.55)' : 'rgba(100,116,139,0.3)';
+                // Hot: dash + animação rápida → "fluxo correndo" (CSS flowDash).
+                // Warm: dash + animação lenta. Cold: dash estático.
+                const dash = isHot ? '6 4' : isWarm ? '4 6' : '3,4';
+                const cls = isHot ? 'edge-hot' : isWarm ? 'edge-warm' : '';
+                return (
+                  <path key={`e-${i}`} d={path}
+                    className={cls}
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth={isHot ? 2.5 : isWarm ? 1.5 : 1}
+                    strokeDasharray={dash}
+                    markerEnd={isHot ? "url(#arrow-busy)" : "url(#arrow)"} />
+                );
+              })}
+
+              {/* Nodes */}
+              {Object.entries(STATION_GRID).map(([id, grid]) => {
+                const pos = nodePos(id);
+                const stats = nodeStats[id] || {};
+                const occ = occupancy[id] || 0;
+                const p95 = stats.p95DurationMs || 0;
+                const errPerMin = stats.errorsPerMin || 0;
+                const visitsPerMin = stats.visitsPerMin || 0;
+                const colors = getNodeColor(grid.kind, occ, maxOccupancy, visitsPerMin, maxVisitsPerMin, p95, errPerMin > 0);
+                const isSelected = selectedStation === id;
+                const isActive = (colors.heat || 0) > 0.15 || visitsPerMin > 0;
+                return (
+                  <g key={id}
+                    transform={`translate(${pos.x}, ${pos.y})`}
+                    className={isActive ? 'node-active' : ''}
+                    onClick={() => setSelectedStation(id === selectedStation ? null : id)}
+                    style={{cursor:'pointer'}}
+                  >
+                    <rect width={NODE_W} height={NODE_H}
+                      rx={10} ry={10}
+                      fill={colors.fill}
+                      stroke={colors.stroke}
+                      strokeWidth={isSelected ? 3 : 1.5}
+                      style={errPerMin > 0 ? {animation: 'errorPulse 1.5s ease-in-out infinite'} : {}} />
+
+                    {/* Kind indicator (small chip top-left) */}
+                    <rect x={6} y={6} width={28} height={12} rx={3} ry={3}
+                      fill={grid.kind === 'qwen' ? '#A855F7' :
+                            grid.kind === 'http' ? '#3483FA' :
+                            grid.kind === 'pool' ? '#64748B' :
+                            grid.kind === 'terminal-good' ? '#22C55E' :
+                            grid.kind === 'terminal-bad' ? '#F97316' :
+                            grid.kind === 'seller-qwen' ? '#A855F7' :
+                            grid.kind === 'seller-http' ? '#F97316' :
+                            grid.kind === 'seller-proc' ? '#F97316' :
+                            grid.kind === 'seller-pool' ? '#94A3B8' :
+                            grid.kind === 'seller-terminal' ? '#F97316' : '#475569'}
+                      opacity={0.7} />
+                    <text x={20} y={15} textAnchor="middle" fontSize={8} fontWeight={700} fill="#0F172A">
+                      {grid.kind === 'qwen' ? 'LLM' :
+                       grid.kind === 'http' ? 'HTTP' :
+                       grid.kind === 'pool' ? 'IDLE' :
+                       grid.kind === 'terminal-good' ? 'OK' :
+                       grid.kind === 'terminal-bad' ? 'END' :
+                       grid.kind === 'seller-qwen' ? 'LLM' :
+                       grid.kind === 'seller-http' ? 'SLR' :
+                       grid.kind === 'seller-proc' ? 'SLR' :
+                       grid.kind === 'seller-pool' ? 'IDLE' :
+                       grid.kind === 'seller-terminal' ? 'DONE' : 'PROC'}
+                    </text>
+
+                    {/* Occupancy badge top-right */}
+                    {occ > 0 && (
+                      <>
+                        <circle cx={NODE_W - 14} cy={14} r={10} fill="#0F172A" stroke="#FFE600" strokeWidth={1.5} />
+                        <text x={NODE_W - 14} y={18} textAnchor="middle" fontSize={11} fontWeight={700} fill="#FFE600">{occ}</text>
+                      </>
+                    )}
+
+                    {/* Label */}
+                    <text x={NODE_W / 2} y={36} textAnchor="middle" fontSize={12} fontWeight={600} fill="#E2E8F0">
+                      {grid.label}
+                    </text>
+
+                    {/* Metrics row */}
+                    <text x={NODE_W / 2} y={52} textAnchor="middle" fontSize={9} fill="#94A3B8" fontFamily="JetBrains Mono, monospace">
+                      p95 {fmtLatency(p95)} · {visitsPerMin}/min
+                    </text>
+                    {errPerMin > 0 && (
+                      <text x={NODE_W / 2} y={63} textAnchor="middle" fontSize={9} fill="#FCA5A5" fontWeight={600}>
+                        ⚠ {errPerMin} err/min
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
+              {/* Row labels */}
+              <text x={10} y={PAD - 15} fontSize={10} fontWeight={700} fill="#475569" letterSpacing={1.5}>BUYER · ENTRY / DECISION</text>
+              <text x={10} y={PAD + NODE_H + ROW_GAP - 15} fontSize={10} fontWeight={700} fill="#475569" letterSpacing={1.5}>BUYER · NAVIGATION / DISCOVERY</text>
+              <text x={10} y={PAD + 2 * (NODE_H + ROW_GAP) - 15} fontSize={10} fontWeight={700} fill="#475569" letterSpacing={1.5}>BUYER · CONVERSION</text>
+              <text x={10} y={PAD + 3 * (NODE_H + ROW_GAP) - 15} fontSize={10} fontWeight={700} fill="#F97316" letterSpacing={1.5}>SELLER · SETUP &amp; AUDIT</text>
+              <text x={10} y={PAD + 4 * (NODE_H + ROW_GAP) - 15} fontSize={10} fontWeight={700} fill="#F97316" letterSpacing={1.5}>SELLER · INVENTORY ACTIONS</text>
+            </svg>
+          </div>
+
+          {/* Drill-down panel (right) */}
+          {selectedStation && (() => {
+            const stats = nodeStats[selectedStation] || {};
+            const grid = STATION_GRID[selectedStation];
+            return (
+              <div style={drillStyles.container}>
+                <button onClick={() => setSelectedStation(null)} style={drillStyles.close}>×</button>
+                <div style={drillStyles.titleRow}>
+                  <span style={drillStyles.title}>{grid.label}</span>
+                  <span style={{...drillStyles.chip,
+                    background: grid.kind === 'qwen' ? 'rgba(168,85,247,0.2)' : 'rgba(51,131,250,0.2)',
+                    color: grid.kind === 'qwen' ? '#C4B5FD' : '#93C5FD'}}>{grid.kind.toUpperCase()}</span>
+                </div>
+                <div style={drillStyles.metrics}>
+                  <Metric label="Ocupação agora" value={occupancy[selectedStation] || 0} unit="agents" />
+                  <Metric label="Visits/min" value={stats.visitsPerMin || 0} unit="/min" />
+                  <Metric label="Visits total" value={stats.visitsTotal || 0} unit="" />
+                  <Metric label="p95 duração" value={fmtLatency(stats.p95DurationMs)} unit="" />
+                  <Metric label="Erros/min" value={stats.errorsPerMin || 0} unit="/min" c={stats.errorsPerMin > 0 ? '#EF4444' : '#22C55E'} />
+                  <Metric label="Erros total" value={stats.errorsTotal || 0} unit="" />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Legend bottom */}
+          <div style={legStyles.container}>
+            <LegendItem color="#A855F7" label="LLM (Qwen)" />
+            <LegendItem color="#3483FA" label="HTTP (Buyer→Melisim)" />
+            <LegendItem color="#475569" label="Procedural" />
+            <LegendItem color="#22C55E" label="Purchased" />
+            <LegendItem color="#F97316" label="Seller / Abandoned" />
+            <span style={legStyles.divider}>·</span>
+            <span style={legStyles.text}>Borda: <span style={{color:'#22C55E'}}>verde</span> &lt;500ms · <span style={{color:'#FACC15'}}>amarelo</span> &lt;2s · <span style={{color:'#EF4444'}}>vermelho</span> &gt;2s ou erro</span>
+          </div>
+        </div>
+      );
+    }
+
+    function KPI({ label, value, c }) {
+      return (
+        <div style={{display:'flex',flexDirection:'column',gap:1,padding:'4px 10px',background:'rgba(30,41,59,0.7)',borderRadius:8,border:'1px solid rgba(71,85,105,0.2)',minWidth:75}}>
+          <span style={{fontSize:9,color:'#94A3B8',textTransform:'uppercase',letterSpacing:0.5,fontWeight:600}}>{label}</span>
+          <span style={{fontSize:15,fontWeight:700,color:c,fontVariantNumeric:'tabular-nums'}}>{value}</span>
+        </div>
+      );
+    }
+
+    function Metric({ label, value, unit, c }) {
+      return (
+        <div style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid rgba(71,85,105,0.15)'}}>
+          <span style={{fontSize:11,color:'#94A3B8'}}>{label}</span>
+          <span style={{fontSize:13,fontWeight:600,color: c || '#E2E8F0',fontVariantNumeric:'tabular-nums'}}>{value}{unit && <span style={{color:'#64748B',fontSize:10,marginLeft:4}}>{unit}</span>}</span>
+        </div>
+      );
+    }
+
+    function LegendItem({ color, label }) {
+      return (
+        <span style={{display:'inline-flex',alignItems:'center',gap:4}}>
+          <span style={{width:10,height:10,borderRadius:2,background:color,opacity:0.6}}></span>
+          <span style={{fontSize:10,color:'#94A3B8'}}>{label}</span>
+        </span>
+      );
+    }
+
+    const hdrStyles = {
+      container: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 16px', background:'rgba(15,23,42,0.95)', borderBottom:'1px solid rgba(71,85,105,0.3)', backdropFilter:'blur(12px)', position:'fixed', top:0, left:0, right:0, zIndex:100, gap:12, minHeight:56 },
+      left: { display:'flex', alignItems:'center', gap:6 },
+      logoIcon: { fontSize:22 },
+      logoText: { fontSize:18, fontWeight:700, color:'#FFE600' },
+      logoSub: { fontSize:12, color:'#94A3B8', marginLeft:4 },
+      kpiRow: { display:'flex', gap:6, flexWrap:'wrap', flex:1, justifyContent:'center' },
+      right: { display:'flex', alignItems:'center', gap:8 },
+      link: { fontSize:11, color:'#93C5FD', textDecoration:'none', padding:'4px 10px', background:'rgba(51,131,250,0.15)', borderRadius:6, border:'1px solid rgba(51,131,250,0.3)' },
+      wsBadge: { display:'inline-flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:5, fontSize:10, fontWeight:700, fontFamily:"'JetBrains Mono', monospace" },
+      wsDot: { width:6, height:6, borderRadius:'50%' },
+      banner: { position:'fixed', top:56, left:0, right:0, background:'rgba(239,68,68,0.15)', borderBottom:'1px solid rgba(239,68,68,0.3)', color:'#FCA5A5', padding:'6px 16px', fontSize:12, zIndex:90, display:'flex', alignItems:'center', backdropFilter:'blur(8px)' },
+    };
+    const drillStyles = {
+      container: { position:'fixed', top:80, right:16, width:280, background:'rgba(15,23,42,0.97)', border:'1px solid rgba(71,85,105,0.4)', borderRadius:12, padding:16, backdropFilter:'blur(12px)', zIndex:80 },
+      close: { position:'absolute', top:8, right:10, background:'none', border:'none', color:'#94A3B8', fontSize:18, cursor:'pointer' },
+      titleRow: { display:'flex', alignItems:'center', gap:8, marginBottom:10 },
+      title: { fontSize:15, fontWeight:700, color:'#F1F5F9' },
+      chip: { fontSize:9, fontWeight:700, padding:'2px 6px', borderRadius:4 },
+      metrics: { display:'flex', flexDirection:'column' },
+    };
+    const legStyles = {
+      container: { position:'fixed', bottom:8, left:'50%', transform:'translateX(-50%)', background:'rgba(15,23,42,0.92)', border:'1px solid rgba(71,85,105,0.2)', borderRadius:8, padding:'5px 12px', display:'flex', alignItems:'center', gap:10, fontSize:10, backdropFilter:'blur(8px)', zIndex:60 },
+      divider: { color:'#475569' },
+      text: { color:'#64748B', fontSize:10 },
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

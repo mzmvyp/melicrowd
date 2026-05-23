@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1280" />
+  <title>MeliCrowd — Tech Lead Tasks</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #020617;
+      color: #E2E8F0;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: rgba(15,23,42,0.5); }
+    ::-webkit-scrollbar-thumb { background: rgba(71,85,105,0.5); border-radius: 4px; }
+    @keyframes shimmer {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+    .priority-critical { animation: shimmer 1.4s ease-in-out infinite; }
+    .markdown { white-space: pre-wrap; font-family: inherit; line-height: 1.5; }
+    .markdown h2, .markdown h3 { color: #FFE600; font-weight: 700; font-size: 13px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+  <script type="text/babel">
+    const API = window.MELICROWD_API_URL || 'http://localhost:8101';
+
+    const COLS = [
+      { id: 'backlog',     label: 'Backlog',      hint: 'A fazer',          color: '#475569' },
+      { id: 'in_progress', label: 'In Progress',  hint: 'Trabalhando',      color: '#3483FA' },
+      { id: 'review',      label: 'Review',       hint: 'Avaliação automática', color: '#FACC15' },
+      { id: 'done',        label: 'Done',         hint: 'Critérios 100% ✓', color: '#22C55E' },
+      { id: 'blocked',     label: 'Blocked',      hint: 'Critérios falharam', color: '#EF4444' },
+    ];
+
+    const CATEGORY_COLORS = {
+      feature: '#3483FA', bugfix: '#EF4444', refactor: '#A855F7',
+      security: '#F97316', observability: '#22C55E', devx: '#FACC15', docs: '#94A3B8',
+    };
+
+    const PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+
+    async function api(path, init) {
+      const r = await fetch(`${API}${path}`, init);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }
+
+    function fmtAge(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      const min = Math.floor((Date.now() - d.getTime()) / 60000);
+      if (min < 60) return `${min}min atrás`;
+      const hrs = Math.floor(min / 60);
+      if (hrs < 24) return `${hrs}h atrás`;
+      return `${Math.floor(hrs / 24)}d atrás`;
+    }
+
+    function slaProgress(task) {
+      if (!task.started_at) return null;
+      const start = new Date(task.started_at).getTime();
+      const elapsed = (Date.now() - start) / 3_600_000; // horas
+      const pct = (elapsed / task.sla_hours) * 100;
+      return { pct: Math.min(pct, 999), over: pct > 100, elapsed: elapsed.toFixed(1) };
+    }
+
+    function App() {
+      const [tasks, setTasks] = React.useState([]);
+      const [counts, setCounts] = React.useState({});
+      const [selected, setSelected] = React.useState(null);
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState(null);
+      const [refreshTick, setRefreshTick] = React.useState(0);
+
+      React.useEffect(() => {
+        let cancelled = false;
+        async function load() {
+          try {
+            const data = await api('/tasks?limit=200');
+            if (!cancelled) {
+              setTasks(data.items);
+              setCounts(data.counts_by_status || {});
+              setError(null);
+            }
+          } catch (e) {
+            if (!cancelled) setError(String(e));
+          }
+        }
+        load();
+        const id = setInterval(load, 8000);
+        return () => { cancelled = true; clearInterval(id); };
+      }, [refreshTick]);
+
+      async function doAction(taskId, action) {
+        setBusy(true);
+        try {
+          const r = await api(`/tasks/${taskId}/${action}`, { method: 'POST' });
+          if (action === 'submit' || action === 'evaluate') {
+            setSelected(r.task);
+          }
+          setRefreshTick(t => t + 1);
+        } catch (e) {
+          alert(`${action} falhou: ${e}`);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function generateNew() {
+        setBusy(true);
+        try {
+          await api('/tasks/generate', { method: 'POST' });
+          setRefreshTick(t => t + 1);
+        } catch (e) {
+          alert(`generate falhou: ${e}`);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      const byCol = {};
+      COLS.forEach(c => { byCol[c.id] = []; });
+      tasks.forEach(t => {
+        if (byCol[t.status]) byCol[t.status].push(t);
+      });
+      Object.values(byCol).forEach(arr => arr.sort((a,b) =>
+        PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]
+      ));
+
+      return (
+        <div style={{display:'flex',flexDirection:'column',height:'100vh'}}>
+          {/* Header */}
+          <header style={S.header}>
+            <div style={S.headerLeft}>
+              <span style={{fontSize:22}}>📋</span>
+              <span style={S.logo}>MeliCrowd</span>
+              <span style={S.logoSub}>Tech Lead · Rafael Mendoza</span>
+            </div>
+            <div style={S.headerKPIs}>
+              <Kpi label="BACKLOG" v={counts.backlog || 0} c="#94A3B8" />
+              <Kpi label="EM ANDAMENTO" v={counts.in_progress || 0} c="#3483FA" />
+              <Kpi label="REVIEW" v={counts.review || 0} c="#FACC15" />
+              <Kpi label="DONE" v={counts.done || 0} c="#22C55E" />
+              <Kpi label="BLOCKED" v={counts.blocked || 0} c="#EF4444" />
+            </div>
+            <div style={S.headerRight}>
+              <a href="/" style={S.link}>← Live Floor</a>
+              <a href="/topology.html" style={S.link}>🗺 Topology</a>
+              <button onClick={generateNew} disabled={busy} style={S.btnPrimary}>
+                + Nova Task (DeepSeek)
+              </button>
+            </div>
+          </header>
+
+          {error && <div style={S.errorBar}>⚠ {error}</div>}
+
+          {/* Kanban */}
+          <div style={S.kanban}>
+            {COLS.map(col => (
+              <div key={col.id} style={S.column}>
+                <div style={{...S.colHeader, borderTopColor: col.color}}>
+                  <span style={{fontWeight:700,fontSize:12}}>{col.label}</span>
+                  <span style={{fontSize:10,color:'#64748B',marginLeft:'auto'}}>{byCol[col.id].length}</span>
+                </div>
+                <div style={S.colHint}>{col.hint}</div>
+                <div style={S.cards}>
+                  {byCol[col.id].length === 0 && (
+                    <div style={S.empty}>—</div>
+                  )}
+                  {byCol[col.id].map(t => (
+                    <TaskCard key={t.task_id} task={t} onClick={() => setSelected(t)} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {selected && (
+            <Drawer task={selected} onClose={() => setSelected(null)} onAction={doAction} busy={busy} />
+          )}
+        </div>
+      );
+    }
+
+    function Kpi({ label, v, c }) {
+      return (
+        <div style={S.kpi}>
+          <span style={S.kpiLabel}>{label}</span>
+          <span style={{...S.kpiValue, color: c}}>{v}</span>
+        </div>
+      );
+    }
+
+    const TaskCard = React.memo(function TaskCard({ task, onClick }) {
+      const sla = slaProgress(task);
+      const catColor = CATEGORY_COLORS[task.category] || '#475569';
+      return (
+        <div onClick={onClick} style={{...S.card, borderLeftColor: catColor}}
+             className={task.priority === 'critical' ? 'priority-critical' : ''}>
+          <div style={S.cardTop}>
+            <span style={{...S.cat, background: catColor + '33', color: catColor}}>{task.category}</span>
+            <span style={{...S.prio, color: priColor(task.priority)}}>{task.priority}</span>
+          </div>
+          <div style={S.cardTitle}>{task.title}</div>
+          <div style={S.cardMeta}>
+            <span>✓ {task.acceptance_criteria.length} critérios</span>
+            <span>{fmtAge(task.generated_at)}</span>
+          </div>
+          {sla && (
+            <div style={S.slaBar}>
+              <div style={{...S.slaFill, width: `${Math.min(sla.pct, 100)}%`, background: sla.over ? '#EF4444' : sla.pct > 80 ? '#FACC15' : '#22C55E'}}/>
+              <span style={S.slaText}>{sla.elapsed}h / {task.sla_hours}h{sla.over ? ' ⚠' : ''}</span>
+            </div>
+          )}
+          {task.last_check_results && task.status !== 'done' && (
+            <div style={S.checkBar}>
+              {task.last_check_results.map((r, i) => (
+                <span key={i} style={{...S.checkDot, background: r.passed ? '#22C55E' : '#EF4444'}} title={r.detail} />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    });
+
+    function priColor(p) {
+      return p === 'critical' ? '#EF4444' : p === 'high' ? '#F97316' : p === 'medium' ? '#FACC15' : '#94A3B8';
+    }
+
+    function Drawer({ task, onClose, onAction, busy }) {
+      return (
+        <div style={S.drawerOverlay} onClick={onClose}>
+          <div style={S.drawer} onClick={e => e.stopPropagation()}>
+            <div style={S.drawerHeader}>
+              <span style={S.drawerTitle}>{task.title}</span>
+              <button onClick={onClose} style={S.closeBtn}>×</button>
+            </div>
+
+            <div style={S.drawerBadges}>
+              <span style={{...S.cat, background: (CATEGORY_COLORS[task.category]||'#475569') + '33', color: CATEGORY_COLORS[task.category]||'#94A3B8'}}>{task.category}</span>
+              <span style={{...S.prio, color: priColor(task.priority)}}>{task.priority}</span>
+              <span style={S.status}>{task.status}</span>
+              <span style={S.modelBadge}>{task.llm_model || '—'}</span>
+            </div>
+
+            <div style={S.section}>
+              <div style={S.sectionLabel}>Descrição</div>
+              <div className="markdown" style={S.desc}>{task.description}</div>
+            </div>
+
+            <div style={S.section}>
+              <div style={S.sectionLabel}>Critérios de Aceite ({task.acceptance_criteria.length})</div>
+              {task.acceptance_criteria.map((c, i) => {
+                const result = (task.last_check_results || [])[i];
+                return (
+                  <div key={i} style={{...S.crit, borderColor: result?.passed ? '#22C55E55' : result ? '#EF444455' : 'rgba(71,85,105,0.3)'}}>
+                    <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                      <span style={S.critKind}>{c.kind}</span>
+                      {result && (
+                        <span style={{color: result.passed ? '#22C55E' : '#EF4444', fontSize:11, fontWeight:700}}>
+                          {result.passed ? '✓' : '✗'}
+                        </span>
+                      )}
+                    </div>
+                    <div style={S.critDesc}>{c.description}</div>
+                    {result && <div style={S.critDetail}>{result.detail}</div>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={S.section}>
+              <div style={S.sectionLabel}>Custo do Tech Lead</div>
+              <div style={{fontSize:12,color:'#94A3B8',fontFamily:'JetBrains Mono'}}>
+                Geração: ${Number(task.generation_cost_usd).toFixed(6)} · Avaliações: ${Number(task.evaluation_cost_usd).toFixed(6)}
+              </div>
+            </div>
+
+            {(task.feedback_history || []).length > 0 && (
+              <div style={S.section}>
+                <div style={S.sectionLabel}>Feedback do Tech Lead</div>
+                {task.feedback_history.map((f, i) => (
+                  <div key={i} style={S.feedback}>
+                    <div style={{fontSize:10,color:'#64748B'}}>{fmtAge(f.ts)}</div>
+                    <div style={{fontSize:12,marginTop:4}}>{f.feedback}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={S.actions}>
+              {task.status === 'backlog' && (
+                <button disabled={busy} onClick={() => onAction(task.task_id, 'start')} style={S.btnPrimary}>
+                  ▶ Start
+                </button>
+              )}
+              {task.status === 'in_progress' && (
+                <button disabled={busy} onClick={() => onAction(task.task_id, 'submit')} style={S.btnSuccess}>
+                  ✓ Submit pra avaliação
+                </button>
+              )}
+              {(task.status === 'review' || task.status === 'blocked' || task.status === 'done') && (
+                <button disabled={busy} onClick={() => onAction(task.task_id, 'evaluate')} style={S.btnSecondary}>
+                  ↻ Re-avaliar
+                </button>
+              )}
+              {task.status === 'blocked' && (
+                <button disabled={busy} onClick={() => onAction(task.task_id, 'submit')} style={S.btnPrimary}>
+                  Re-submit
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const S = {
+      header: { display:'flex', alignItems:'center', padding:'10px 16px', background:'rgba(15,23,42,0.95)', borderBottom:'1px solid rgba(71,85,105,0.3)', gap:14 },
+      headerLeft: { display:'flex', alignItems:'center', gap:6 },
+      headerKPIs: { display:'flex', gap:6, flex:1, justifyContent:'center' },
+      headerRight: { display:'flex', alignItems:'center', gap:8 },
+      logo: { fontSize:18, fontWeight:700, color:'#FFE600' },
+      logoSub: { fontSize:11, color:'#94A3B8' },
+      link: { fontSize:11, color:'#93C5FD', textDecoration:'none', padding:'4px 8px', background:'rgba(51,131,250,0.15)', borderRadius:4 },
+      btnPrimary: { background:'#FFE600', color:'#0F172A', border:'none', padding:'7px 12px', borderRadius:6, fontSize:12, fontWeight:700, cursor:'pointer' },
+      btnSuccess: { background:'#22C55E', color:'#0F172A', border:'none', padding:'7px 12px', borderRadius:6, fontSize:12, fontWeight:700, cursor:'pointer' },
+      btnSecondary: { background:'rgba(71,85,105,0.4)', color:'#E2E8F0', border:'1px solid rgba(71,85,105,0.6)', padding:'7px 12px', borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer' },
+      errorBar: { background:'rgba(239,68,68,0.15)', color:'#FCA5A5', padding:'6px 16px', fontSize:12, borderBottom:'1px solid rgba(239,68,68,0.3)' },
+      kpi: { display:'flex', flexDirection:'column', padding:'4px 10px', background:'rgba(30,41,59,0.7)', borderRadius:6, minWidth:80 },
+      kpiLabel: { fontSize:9, color:'#94A3B8', fontWeight:600, letterSpacing:0.5 },
+      kpiValue: { fontSize:18, fontWeight:700, fontFamily:'JetBrains Mono' },
+      kanban: { flex:1, display:'flex', gap:10, padding:14, overflowX:'auto' },
+      column: { flex:'0 0 240px', display:'flex', flexDirection:'column', maxHeight:'100%' },
+      colHeader: { display:'flex', alignItems:'center', padding:'6px 10px', background:'rgba(30,41,59,0.7)', borderTop:'3px solid', borderRadius:'6px 6px 0 0' },
+      colHint: { padding:'4px 10px', background:'rgba(15,23,42,0.5)', fontSize:10, color:'#64748B', borderBottom:'1px solid rgba(71,85,105,0.2)' },
+      cards: { flex:1, overflowY:'auto', padding:'8px 4px', display:'flex', flexDirection:'column', gap:8, background:'rgba(15,23,42,0.3)', borderRadius:'0 0 6px 6px' },
+      empty: { textAlign:'center', color:'#475569', fontSize:11, padding:'14px 4px' },
+      card: { background:'rgba(30,41,59,0.7)', borderRadius:6, padding:'8px 10px', borderLeft:'3px solid', cursor:'pointer', transition:'transform 0.1s' },
+      cardTop: { display:'flex', justifyContent:'space-between', marginBottom:4 },
+      cat: { fontSize:9, fontWeight:700, padding:'2px 6px', borderRadius:3, textTransform:'uppercase' },
+      prio: { fontSize:9, fontWeight:700, textTransform:'uppercase' },
+      cardTitle: { fontSize:12, fontWeight:600, color:'#E2E8F0', lineHeight:1.3, marginBottom:6 },
+      cardMeta: { display:'flex', justifyContent:'space-between', fontSize:10, color:'#64748B' },
+      slaBar: { marginTop:6, height:14, background:'rgba(15,23,42,0.7)', borderRadius:3, position:'relative', overflow:'hidden' },
+      slaFill: { position:'absolute', top:0, left:0, bottom:0, transition:'width 0.3s' },
+      slaText: { position:'relative', fontSize:9, color:'#E2E8F0', padding:'2px 5px', fontFamily:'JetBrains Mono' },
+      checkBar: { marginTop:6, display:'flex', gap:3 },
+      checkDot: { width:8, height:8, borderRadius:'50%' },
+      drawerOverlay: { position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:100, display:'flex', justifyContent:'flex-end' },
+      drawer: { width:540, background:'rgba(15,23,42,0.97)', borderLeft:'1px solid rgba(71,85,105,0.4)', padding:16, overflowY:'auto', backdropFilter:'blur(12px)' },
+      drawerHeader: { display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 },
+      drawerTitle: { fontSize:16, fontWeight:700, color:'#F1F5F9', flex:1, paddingRight:12 },
+      closeBtn: { background:'none', border:'none', color:'#94A3B8', fontSize:22, cursor:'pointer' },
+      drawerBadges: { display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 },
+      status: { fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:3, background:'rgba(71,85,105,0.4)', color:'#CBD5E1', textTransform:'uppercase' },
+      modelBadge: { fontSize:9, padding:'2px 6px', borderRadius:3, background:'rgba(168,85,247,0.2)', color:'#C4B5FD', fontFamily:'JetBrains Mono' },
+      section: { marginBottom:14 },
+      sectionLabel: { fontSize:10, color:'#64748B', fontWeight:700, textTransform:'uppercase', letterSpacing:0.5, marginBottom:6 },
+      desc: { fontSize:12, color:'#CBD5E1', background:'rgba(15,23,42,0.5)', padding:10, borderRadius:6, maxHeight:200, overflowY:'auto' },
+      crit: { background:'rgba(15,23,42,0.6)', borderRadius:5, padding:'7px 10px', marginBottom:6, border:'1px solid' },
+      critKind: { fontSize:9, fontWeight:700, padding:'2px 5px', borderRadius:3, background:'rgba(71,85,105,0.5)', color:'#E2E8F0', textTransform:'uppercase', fontFamily:'JetBrains Mono' },
+      critDesc: { fontSize:12, color:'#E2E8F0', marginTop:4 },
+      critDetail: { fontSize:11, color:'#94A3B8', marginTop:4, fontFamily:'JetBrains Mono' },
+      feedback: { background:'rgba(15,23,42,0.6)', borderLeft:'3px solid #FACC15', padding:'8px 10px', borderRadius:4, marginBottom:6 },
+      actions: { display:'flex', gap:8, marginTop:20, paddingTop:14, borderTop:'1px solid rgba(71,85,105,0.3)' },
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
