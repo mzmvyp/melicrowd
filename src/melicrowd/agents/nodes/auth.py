@@ -29,13 +29,15 @@ async def run(state: AgentState) -> NodeUpdate:
     suffix = random.randint(10000, 99999)
     email = f"{p.name.lower().replace(' ', '.')}+{suffix}@melicrowd.test"
     result = await client.signup(name=p.name, email=email, password="melicrowd-test-pw")
-    state.melisim_calls_count += 1
     LOGGER.info(
         "auth ok",
         extra={"session_id": str(state.session_id), "user_id": result.user_id},
     )
+    # melisim_calls_count vai no UPDATE retornado (não em mutação in-place):
+    # LangGraph só propaga o que o nó retorna — incremento in-place se perdia.
     return {
         "melisim_user_id": result.user_id,
         "auth_token": result.access_token,
+        "melisim_calls_count": state.melisim_calls_count + 1,
         "current_page": "auth",
     }

@@ -15,6 +15,7 @@ Resize:
 from __future__ import annotations
 
 import asyncio
+import random
 from typing import Final
 
 from loguru import logger
@@ -76,6 +77,11 @@ class AgentPool:
         tracker = get_tracker()
         await tracker.register_worker(worker_id)
         try:
+            # Jitter de startup: sem isso, N workers iniciam a 1ª sessão no
+            # MESMO segundo → N decide_session simultâneos no Qwen → fila no
+            # semaphore + Ollama e p95 de 18-34s (medido com 50 workers).
+            # Espalhar os inícios por ~2 min dilui o burst para o steady-state.
+            await self._wait_or_shutdown(random.uniform(0.0, 120.0))
             while not self._shutdown_event.is_set():
                 # Antes de cada sessão garante estado idle no waiting_pool
                 # (caso a sessão anterior tenha terminado em "purchased"/"abandon",

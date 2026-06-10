@@ -19,9 +19,13 @@ integração com os sistemas vizinhos.
 
 ## Princípios
 
-1. **Sparse LLM** — chamadas a LLM são caras (latência + GPU/USD). O LLM atua
-   apenas nas decisões macro (4 por sessão de buyer); tudo entre elas é Markov
-   procedural barata e determinística.
+1. **O LLM pontua, o procedural sorteia** — LLM em temperatura baixa é um
+   classificador ~determinístico: pedir decisão binária a ele produz taxa
+   agregada tudo-ou-nada (medido: 0%, 90%, 0% em três calibrações de prompt),
+   nunca os 3-8% do varejo real. O Qwen devolve juízo qualitativo contínuo
+   (intent, `interest_level` 0-1); a amostragem é de um RNG procedural
+   calibrado, modulado pelo score (fator 0.4-1.6× centrado em 1.0). Entre as
+   decisões, timing humano procedural (think/digitação/scroll) dá o pacing.
 2. **Fallback sempre** — todo nó que usa LLM tem um caminho procedural de
    contingência baseado nos atributos da persona. Timeout ou JSON inválido no
    Qwen nunca trava uma sessão.
@@ -48,8 +52,8 @@ integração com os sistemas vizinhos.
 | **Control plane** | start/stop/scale, inspeção, replay, geração de tasks (FastAPI :8101, Streamlit :8502, CLI) | < 100 ms |
 | **Orchestration** | ciclo de vida de N buyers + M sellers + serviço Tech Lead; signal handling | tick 1 s |
 | **Agents** | buyer (LangGraph, estado + checkpoint) · seller (loop procedural) · tech lead (loop DeepSeek) | tick 100 ms |
-| **Decision** | Qwen 3 14B (4 calls/sessão buyer, 3/sessão seller) · DeepSeek V4 Pro (tech lead) | 2–15 s p95 |
-| **Execution** | Markov + HTTP (httpx) + timing humano + error injection; token bucket | 100 ms–30 s |
+| **Decision** | Qwen 3 8B (2-9 calls/sessão buyer, 3/sessão seller) · DeepSeek V4 Pro (tech lead) | 1–6 s p95 |
+| **Execution** | sorteio calibrado + HTTP (httpx) + timing humano + error injection; token bucket | 100 ms–30 s |
 | **Persistence** | Redis (estado vivo, checkpoint, TTL) + Postgres (histórico, tasks) | < 50 ms |
 | **Observability** | Prometheus + LiveAgentTracker + decision trace | passivo |
 
@@ -62,13 +66,15 @@ usa o motor de decisão mais adequado à sua complexidade.
 
 Compradores são o caso mais complexo (ramificações reais: comparar, voltar à
 lista, abandonar, pagar), então usam uma **máquina de estado LangGraph** com 14
-nós e 5 arestas condicionais. O estado é um modelo Pydantic; o checkpointer
-Redis (TTL 1 h) habilita replay determinístico e recovery.
+nós e 5 arestas condicionais. O estado é um modelo Pydantic; o fluxo default
+roda sem checkpointer (sessões one-shot); o `RedisCheckpointer` (TTL 1 h) é
+injetável para replay determinístico e recovery.
 
-As 4 chamadas Qwen por sessão: `decide_session` (intenção + orçamento),
-`evaluate_item` (adicionar ao carrinho?), `checkout_decision` (pagar ou
-abandonar?) e `write_review` (opcional, pós-compra). Os outros 10 nós são
-procedurais.
+As chamadas Qwen por sessão (2-9, conforme o caminho): `decide_session`
+(intenção + orçamento), `evaluate_item` (score de interesse 0-1 por produto
+visto — a decisão é amostrada proceduralmente com o score como modulador),
+`write_review` (opcional, pós-compra) e `checkout_decision` (opcional via
+config; default procedural). Os demais nós são procedurais com timing humano.
 
 ### Seller — loop procedural
 
@@ -157,7 +163,7 @@ Versões pinadas em `pyproject.toml`. Destaques:
 
 ### Qwen / Ollama (LLM local)
 
-- Endpoint: `http://host.docker.internal:11434`; modelo `qwen3:14b`.
+- Endpoint: `http://host.docker.internal:11434`; modelo `qwen3:8b`.
 - Pool semaphore: máximo de 12 chamadas concorrentes — tune via
   `MELICROWD_QWEN_MAX_CONCURRENT`. Acima disso, o p99 do Ollama 14B degrada.
 

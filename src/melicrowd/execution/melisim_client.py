@@ -13,7 +13,10 @@ A API pública é estável — Phase 3 nodes não precisam mudar.
 """
 from __future__ import annotations
 
+import hashlib
 import random
+import re
+import time
 from dataclasses import dataclass
 from typing import Any, Final
 from uuid import uuid4
@@ -22,7 +25,7 @@ import httpx
 from loguru import logger
 from tenacity import (
     AsyncRetrying,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -31,8 +34,32 @@ from melicrowd.agents.state import Product
 from melicrowd.config import settings
 from melicrowd.execution import error_injection
 from melicrowd.execution.rate_limiter import get_melisim_bucket
+from melicrowd.observability.hooks import on_melisim_call
 
 LOGGER: Final = logger.bind(module="execution.melisim_client")
+
+# Status HTTP que valem retry (transitórios do lado servidor): rate limit e
+# indisponibilidade momentânea. Demais 4xx são erros de cliente — não retentar.
+_RETRYABLE_STATUS: Final[frozenset[int]] = frozenset({429, 503})
+_ID_SEGMENT_RE: Final = re.compile(r"^\d+$")
+
+
+def _is_retryable_request_error(exc: BaseException) -> bool:
+    """Predicate do tenacity: retry em timeout/rede e em 429/503."""
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRYABLE_STATUS
+    return False
+
+
+def _normalize_endpoint(method: str, path: str) -> str:
+    """Normaliza o path para label de métrica (colapsa IDs, tira query)."""
+    segments = [
+        ":id" if _ID_SEGMENT_RE.match(seg) else seg
+        for seg in path.split("?", 1)[0].strip("/").split("/")
+    ]
+    return f"{method} /{'/'.join(segments)}"
 
 DEFAULT_HEADERS: Final[dict[str, str]] = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MeliCrowd/0.1 (+simulated buyer)",
@@ -84,10 +111,12 @@ class MelisimClient:
 
     @staticmethod
     def _retry_policy() -> AsyncRetrying:
+        # Inclui 429/503 com backoff: o token bucket evita o estouro na maioria
+        # dos casos, mas um pico transitório não deve matar a sessão inteira.
         return AsyncRetrying(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
-            retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
+            stop=stop_after_attempt(4),
+            wait=wait_exponential(multiplier=0.5, min=0.5, max=8),
+            retry=retry_if_exception(_is_retryable_request_error),
             reraise=True,
         )
 
@@ -111,9 +140,13 @@ class MelisimClient:
             headers["Idempotency-Key"] = idempotency_key
 
         client = await self._get_client()
+        endpoint = _normalize_endpoint(method, path)
         async for attempt in self._retry_policy():
             with attempt:
+                t0 = time.perf_counter()
                 response = await client.request(method, path, json=json, params=params, headers=headers or None)
+                # Registra a chamada (status real, inclusive 429) antes do raise.
+                on_melisim_call(endpoint, response.status_code, time.perf_counter() - t0)
                 response.raise_for_status()
                 if not response.content:
                     return {}
@@ -129,8 +162,8 @@ class MelisimClient:
         payload = error_injection.maybe_inject_form_payload_corruption(
             {"name": name, "email": email, "password": password, "userType": "BUYER"}
         )
-        body = await self._request("POST", "/api/v1/auth/register", json=payload)
-        # Melisim register doesn't return token; do login next.
+        # Melisim register não retorna token; ignoramos o body e fazemos login.
+        await self._request("POST", "/api/v1/auth/register", json=payload)
         return await self.login(email, password)
 
     async def login(self, email: str, password: str) -> AuthResult:
@@ -278,22 +311,9 @@ class MelisimClient:
         """Lista produtos pertencentes a um seller (filtra localmente).
 
         O Melisim products-service não suporta filtro server-side por seller_id;
-        listamos paginado e filtramos por ``product.seller_id``.
+        listamos paginado (raw, preservando ``seller_id``) e filtramos localmente.
         """
-        seller_id_int = int(seller_id) if seller_id.isdigit() else None
-        out: list[Product] = []
-        for page in range(1, max_pages + 1):
-            page_items = await self.list_products(page=page, size=50, auth_token=auth_token)
-            if not page_items:
-                break
-            for p in page_items:
-                # Pode chegar string ou int — comparar ambos.
-                # Como Product não tem seller_id (subset), vamos refazer com chamada raw.
-                out.append(p)
-            if len(page_items) < 50:
-                break
-        # Filtrar pelos retornados — busca raw com seller_id intacto.
-        return await self._filter_by_seller(seller_id, auth_token=auth_token)
+        return await self._filter_by_seller(seller_id, auth_token=auth_token, max_pages=max_pages)
 
     async def _filter_by_seller(
         self,
@@ -394,16 +414,50 @@ class MelisimClient:
         return str(body.get("status", "UNKNOWN"))
 
 
+# MeliSim só guarda id/título/preço/categoria/estoque — sem brand/rating/reviews.
+# Sintetizamos esses 3 campos de forma ESTÁVEL por product_id (mesmo produto →
+# mesmos números em list/detail e entre sessões).
+_SYNTH_BRANDS: Final = (
+    "Samsung", "LG", "Philips", "Multilaser", "Mondial", "Nike", "Adidas",
+    "Brastemp", "Electrolux", "Positivo", "Xiaomi", "JBL", "Britânia", "Dell",
+)
+
+
+def _synth_attrs(product_id: str) -> tuple[float, int, str]:
+    """Sintetiza (rating, review_count, brand) determinísticos a partir do id.
+
+    Sem isso, todo produto real chega com ``rating=0`` e o agente rejeita ~100 %
+    ("rating < 3.5 → back_to_list"), zerando a conversão. Geramos valores
+    estáveis (hash do id) numa faixa realista de marketplace.
+    """
+    h = int(hashlib.sha256(product_id.encode("utf-8")).hexdigest()[:12], 16)
+    # Faixa 3.0–4.99 com ~25 % abaixo de 3.5: catálogo realista tem produtos
+    # medianos/ruins que o agente rejeita, ajudando a conversão a ficar realista.
+    rating = round(3.0 + (h % 200) / 100.0, 1)  # 3.0–4.99
+    review_count = 8 + (h // 200) % 4200  # 8–4207
+    brand = _SYNTH_BRANDS[(h // 7) % len(_SYNTH_BRANDS)]
+    return rating, review_count, brand
+
+
 def _parse_product(payload: dict[str, Any]) -> Product:
-    """Normaliza payload do Melisim para ``Product``."""
+    """Normaliza payload do Melisim para ``Product``.
+
+    ``brand``/``rating``/``review_count`` não existem no catálogo MeliSim —
+    sintetizados por id quando ausentes (ver ``_synth_attrs``). Se o gateway
+    passar a devolvê-los um dia, os valores reais têm precedência.
+    """
+    product_id = str(payload.get("id") or payload.get("product_id") or "")
+    syn_rating, syn_reviews, syn_brand = _synth_attrs(product_id)
     return Product(
-        product_id=str(payload.get("id") or payload.get("product_id") or ""),
+        product_id=product_id,
         title=str(payload.get("title") or payload.get("name") or ""),
         price=float(payload.get("price", 0)),
         category=str(payload.get("category", "")),
-        brand=str(payload.get("brand", "")),
-        rating=float(payload.get("rating", 0)),
-        review_count=int(payload.get("review_count") or payload.get("reviewCount", 0)),
+        brand=str(payload.get("brand") or syn_brand),
+        rating=float(payload.get("rating") or syn_rating),
+        review_count=int(
+            payload.get("review_count") or payload.get("reviewCount") or syn_reviews
+        ),
         stock=int(payload.get("stock", 0)),
     )
 

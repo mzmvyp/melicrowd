@@ -24,6 +24,7 @@ from melicrowd.api.state import get_app_state
 from melicrowd.config import settings
 from melicrowd.db import dispose_engine
 from melicrowd.execution.kafka_publisher import get_publisher
+from melicrowd.llm.qwen_client import close_client as close_qwen_client
 from melicrowd.logging_setup import configure_logging
 
 limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.api_rate_limit_per_minute}/minute"])
@@ -44,6 +45,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if state.seller_pool is not None:
         await state.seller_pool.shutdown(timeout=30.0)
     await get_publisher().stop()
+    await close_qwen_client()
     await dispose_engine()
     logger.bind(module="api.main").info("api shutdown")
 

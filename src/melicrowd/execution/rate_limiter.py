@@ -33,23 +33,33 @@ class TokenBucket:
     def __init__(self, capacity: int, refill_per_second: float) -> None:
         self.capacity = float(capacity)
         self.refill_per_second = refill_per_second
-        self._tokens = float(capacity)
+        # Começa VAZIO (não cheio): um bucket cheio liberaria um burst de
+        # `capacity` requests no startup que, sozinho, estoura a janela de 1 min
+        # do gateway do MeliSim (→ 429 em massa). Os tokens acumulam à taxa de
+        # refill a partir do primeiro acquire, suavizando o ramp-up.
+        self._tokens = 0.0
         self._last_refill = asyncio.get_event_loop().time() if asyncio.get_event_loop().is_running() else 0.0
         self._lock = asyncio.Lock()
 
     async def acquire(self, n: int = 1) -> None:
-        """Adquire ``n`` tokens. Bloqueia se não houver."""
-        async with self._lock:
-            await self._refill()
-            if self._tokens >= n:
-                self._tokens -= n
-                return
-            needed = n - self._tokens
-            wait = needed / self.refill_per_second
-        await asyncio.sleep(wait)
-        async with self._lock:
-            await self._refill()
-            self._tokens = max(0.0, self._tokens - n)
+        """Adquire ``n`` tokens. Bloqueia (async) até haver saldo.
+
+        Loop de re-checagem: após dormir, o waiter RE-VERIFICA o saldo sob o
+        lock antes de debitar. Sem isso, sob contenção (N waiters acordando ao
+        mesmo tempo) todos debitavam e o ``max(0.0, ...)`` engolia o déficit —
+        deixando passar mais requests do que o rate limit permite. Agora só
+        debita quem realmente encontra tokens; os demais recalculam e voltam a
+        dormir, preservando o teto efetivo do bucket.
+        """
+        while True:
+            async with self._lock:
+                await self._refill()
+                if self._tokens >= n:
+                    self._tokens -= n
+                    return
+                needed = n - self._tokens
+                wait = needed / self.refill_per_second
+            await asyncio.sleep(wait)
 
     async def _refill(self) -> None:
         now = asyncio.get_event_loop().time()

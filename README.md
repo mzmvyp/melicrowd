@@ -7,7 +7,7 @@
 <img alt="Python" src="https://img.shields.io/badge/python-3.11-blue.svg">
 <img alt="LangGraph" src="https://img.shields.io/badge/agents-LangGraph-7c3aed.svg">
 <img alt="FastAPI" src="https://img.shields.io/badge/api-FastAPI-009688.svg">
-<img alt="LLM" src="https://img.shields.io/badge/LLM-Qwen3%2014B%20%2B%20DeepSeek%20V4-orange.svg">
+<img alt="LLM" src="https://img.shields.io/badge/LLM-Qwen3%208B%20%2B%20DeepSeek%20V4-orange.svg">
 <img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg">
 </p>
 
@@ -15,7 +15,7 @@
 |---|---|
 | **Linguagem** | Python 3.11 (async / `uvloop`) |
 | **Orquestração de agentes** | LangGraph (state machine + checkpointer) |
-| **LLMs** | Qwen 3 14B local (Ollama) · DeepSeek V4 Pro (cloud) |
+| **LLMs** | Qwen 3 8B local (Ollama) · DeepSeek V4 Pro (cloud) |
 | **Persistência** | PostgreSQL 16 · Redis 7.4 |
 | **Mensageria** | Apache Kafka (telemetria → data lake) |
 | **Observabilidade** | Prometheus · Grafana · WebSocket Live Floor · decision trace |
@@ -31,7 +31,7 @@ O sistema cobre **três populações de agentes** que, juntas, formam um marketp
 
 | Agente | Motor de decisão | Papel |
 |---|---|---|
-| 🛒 **Buyer** | LangGraph (14 nós, 4 chamadas Qwen/sessão) | Navega o catálogo, avalia produtos, abandona ou compra, escreve reviews |
+| 🛒 **Buyer** | LangGraph (14 nós, 2-9 chamadas Qwen/sessão) | Navega o catálogo, avalia produtos (score LLM × sorteio calibrado), abandona ou compra, escreve reviews |
 | 🏪 **Seller** | Loop procedural (3 chamadas Qwen/sessão) | Audita inventário, repõe estoque, cria/precifica produtos, responde alertas |
 | 🧑‍💼 **Tech Lead** | DeepSeek V4 Pro (cloud) | Gera tarefas técnicas de melhoria com critérios de aceite **objetivos**, avalia entregas automaticamente e fecha quando 100% dos checks passam |
 
@@ -57,10 +57,10 @@ Gerar dados e carga realistas de e-commerce sem tráfego de produção (caro, le
 │  AGENTS         Buyer = LangGraph (14 nós + Redis checkpointer)           │
 │                 Seller = loop procedural   ·   Tech Lead = DeepSeek loop  │
 ├──────────────────────────────────────────────────────────────────────────┤
-│  DECISION       Qwen 3 14B (Ollama, semaphore=12)  │  DeepSeek V4 Pro     │
-│                 sparse: 4 calls/sessão buyer        │  geração + avaliação │
+│  DECISION       Qwen 3 8B (Ollama, semaphore=8)    │  DeepSeek V4 Pro     │
+│                 híbrido: LLM pontua, RNG sorteia    │  geração + avaliação │
 ├──────────────────────────────────────────────────────────────────────────┤
-│  EXECUTION      Markov procedural + httpx + timing humano + error inject  │
+│  EXECUTION      sorteio calibrado + httpx + timing humano + error inject  │
 │                 token bucket → respeita rate limit do MeliSim             │
 ├──────────────────────────────────────────────────────────────────────────┤
 │  PERSISTENCE    PostgreSQL 16 (histórico + tasks)  ·  Redis 7.4 (live)    │
@@ -73,7 +73,7 @@ Gerar dados e carga realistas de e-commerce sem tráfego de produção (caro, le
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Princípio central — _sparse LLM_:** o LLM é caro, então é chamado apenas nas decisões macro (4 por sessão de buyer). Tudo entre elas é **Markov procedural** modulada pela persona — barato, determinístico e ~20× mais econômico que "chamar o LLM em todo evento". Quando o LLM falha (timeout, JSON inválido), cada nó cai num **fallback procedural** baseado nos atributos da persona: a sessão nunca trava.
+**Princípio central — _o LLM pontua, o procedural sorteia_:** um LLM em temperatura baixa é um classificador ~determinístico — pedir a ele uma decisão binária produz taxa agregada "tudo-ou-nada" (medido: 0%, 90%, 0% em três calibrações de prompt), nunca os ~3-8% de conversão do varejo real. Por isso as decisões seguem o padrão híbrido: o Qwen devolve **juízo qualitativo contínuo** (intent da sessão, `interest_level` 0-1 por produto) e a **amostragem** fica num RNG procedural calibrado, modulado por persona + score do LLM (fator 0.4-1.6×, centrado em 1.0). A pacing entre nós usa **timing humano** (think time, digitação, scroll — `execution/timing.py`, escala configurável). Quando o LLM falha (timeout, JSON inválido), cada nó cai num **fallback neutro** que preserva a calibração: a sessão nunca trava e a taxa não desloca.
 
 Detalhes de design, camadas e trade-offs em **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
@@ -83,7 +83,7 @@ Detalhes de design, camadas e trade-offs em **[ARCHITECTURE.md](ARCHITECTURE.md)
 
 ### 🛒 Buyer — máquina de estado LangGraph
 
-Cada comprador percorre um grafo de **14 nós** (4 dirigidos por Qwen, 10 procedurais) com 5 arestas condicionais:
+Cada comprador percorre um grafo de **14 nós** (3 com Qwen por default — `decide_session`, `evaluate_item` híbrido e `write_review`; `checkout_decision` opcional — o restante procedural) com 5 arestas condicionais:
 
 ```
 load_persona → decide_session ─┬─▶ auth → browse_home → search → product_list
@@ -95,7 +95,7 @@ add_to_cart → continue_or_checkout ─┬─▶ search (continua)
                                                            └─▶ abandon → END
 ```
 
-Estado tipado em Pydantic, persistido em Redis (checkpointer, TTL 1 h) → permite **replay determinístico** e **recovery** se um worker cai no meio de uma sessão.
+Estado tipado em Pydantic. O fluxo default roda **sem checkpointer** (sessões são one-shot; um saver compartilhado acumularia estado de todas as sessões); para **replay/recovery** há um `RedisCheckpointer` (TTL 1 h) injetável via `build_agent_graph(checkpointer)`.
 
 ### 🏪 Seller — gestão de catálogo
 
@@ -111,7 +111,7 @@ Documentação completa em **[docs/tech-lead-agent.md](docs/tech-lead-agent.md)*
 
 ## Quickstart
 
-> **Pré-requisitos:** Docker (Compose v2+), Ollama com `qwen3:14b` baixado, e os sistemas vizinhos (`MeliSim`, data lake) com as redes Docker externas `melisim_melisim` e `melisimlake-net` ativas.
+> **Pré-requisitos:** Docker (Compose v2+), Ollama com `qwen3:8b` baixado (`ollama pull qwen3:8b`) e a env de sistema `OLLAMA_NUM_PARALLEL>=4` para o semáforo do app não serializar no Ollama, e os sistemas vizinhos (`MeliSim`, data lake) com as redes Docker externas `melisim_melisim` e `melisimlake-net` ativas.
 
 ```bash
 cp .env.example .env          # ajuste credenciais (ver seção Configuração)
@@ -154,7 +154,7 @@ Todas as variáveis usam o prefixo `MELICROWD_` e são validadas por `pydantic-s
 
 | Variável | Default | Função |
 |---|---|---|
-| `MELICROWD_QWEN_MODEL` | `qwen3:14b` | Modelo local servido pelo Ollama |
+| `MELICROWD_QWEN_MODEL` | `qwen3:8b` | Modelo local servido pelo Ollama (validado por benchmark vs 14b) |
 | `MELICROWD_QWEN_MAX_CONCURRENT` | `12` | Teto de chamadas Qwen concorrentes (semaphore) |
 | `MELICROWD_DEFAULT_AGENT_COUNT` | `50` | Buyers no pool |
 | `MELICROWD_DEEPSEEK_API_KEY` | — | Chave da API DeepSeek (Tech Lead Agent) |
@@ -170,7 +170,7 @@ Veja `.env.example` para a lista completa.
 
 - **Python 3.11** + **uvloop** — event loop async de alta performance
 - **LangGraph 0.2** — state machine de agentes com checkpointers plugáveis (Redis)
-- **Qwen 3 14B** via **Ollama** (LLM local) · **DeepSeek V4 Pro** (LLM cloud, OpenAI-compatible)
+- **Qwen 3 8B** via **Ollama** (LLM local) · **DeepSeek V4 Pro** (LLM cloud, OpenAI-compatible)
 - **FastAPI 0.115** · **Streamlit 1.41** · **Typer** — control plane, UI e CLI
 - **httpx 0.28** (async) · **tenacity 9** (retry exponencial) · **aiokafka 0.12**
 - **PostgreSQL 16** + **asyncpg** + **SQLAlchemy 2.x async** + **Alembic**

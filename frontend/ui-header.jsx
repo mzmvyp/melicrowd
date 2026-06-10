@@ -41,8 +41,11 @@ function Icon({ name, size = 18, className = '' }) {
 }
 
 /* ── Header Component ── */
-const Header = React.memo(function Header({ kpis, controls, connectionStatus, onSeedPersonas }) {
-  const { isRunning, setIsRunning, agentCount, setAgentCount, showTrails, setShowTrails, showLabels, setShowLabels, scalePool } = controls;
+const Header = React.memo(function Header({ kpis, controls, connectionStatus, onSeedPersonas, onSeedSellers }) {
+  const {
+    isRunning, setIsRunning, agentCount, setAgentCount, showTrails, setShowTrails, showLabels, setShowLabels, scalePool,
+    sellerCount, setSellerCount, sellerPoolRunning, setSellerPoolRunning, scaleSellers,
+  } = controls;
   const wsBadgeColor = connectionStatus === 'open' ? '#22C55E' : connectionStatus === 'connecting' ? '#FACC15' : '#EF4444';
   const wsBadgeLabel = connectionStatus === 'open' ? 'LIVE' : connectionStatus === 'connecting' ? 'CONNECTING' : 'OFFLINE';
 
@@ -64,6 +67,9 @@ const Header = React.memo(function Header({ kpis, controls, connectionStatus, on
     { label: 'Qwen/min', value: kpis.qwenCallsPerMin, icon: 'Brain', color: '#A855F7' },
     { label: 'P95 Latency', value: `${kpis.p95QwenLatency}s`, icon: 'Zap', color: '#FACC15' },
     { label: 'Errors (5m)', value: kpis.errorsLast5Min, icon: 'AlertTriangle', color: kpis.errorsLast5Min > 5 ? '#EF4444' : '#64748B' },
+    { label: 'Sellers', value: kpis.sellerTotalWorkers ?? 0, icon: 'Users', color: '#F97316' },
+    { label: 'Seller busy', value: kpis.sellerBusyWorkers ?? 0, icon: 'Activity', color: '#FB923C' },
+    { label: 'Seller sess/min', value: kpis.sellerSessionsPerMin ?? 0, icon: 'Timer', color: '#FDBA74' },
   ];
 
   return (
@@ -115,10 +121,31 @@ const Header = React.memo(function Header({ kpis, controls, connectionStatus, on
         </div>
         {onSeedPersonas && (
           <button onClick={() => {
-            const n = Number(prompt('Quantas personas gerar via Qwen?', '50'));
+            const n = Number(prompt('Quantas personas comprador gerar via Qwen?', '50'));
             if (n > 0) onSeedPersonas(n);
-          }} style={headerStyles.toggleBtn} title="Generate personas via Qwen">
-            Seed personas
+          }} style={headerStyles.toggleBtn} title="Generate buyer personas via Qwen">
+            Seed buyers
+          </button>
+        )}
+        <label style={headerStyles.sliderLabel} title="Pool de vendedores (procedural)">
+          Sellers: {sellerCount ?? 5}
+          <input type="range" min={1} max={50} value={sellerCount ?? 5}
+            onChange={e => setSellerCount(Number(e.target.value))}
+            onMouseUp={() => sellerPoolRunning && scaleSellers && scaleSellers(sellerCount)}
+            style={headerStyles.slider} />
+        </label>
+        <button onClick={() => setSellerPoolRunning && setSellerPoolRunning(!sellerPoolRunning)}
+          style={{...headerStyles.btn, borderColor: sellerPoolRunning ? 'rgba(249,115,22,0.5)' : 'rgba(71,85,105,0.4)', color: sellerPoolRunning ? '#F97316' : '#94A3B8'}}
+          aria-label={sellerPoolRunning ? 'Stop seller pool' : 'Start seller pool'}
+          title={sellerPoolRunning ? 'Parar pool de vendedores' : 'Iniciar pool de vendedores'}>
+          <Icon name={sellerPoolRunning ? 'Square' : 'Play'} size={14} />
+        </button>
+        {onSeedSellers && (
+          <button onClick={() => {
+            const n = Number(prompt('Quantas personas seller sintéticas inserir?', '5'));
+            if (n > 0) onSeedSellers(n);
+          }} style={headerStyles.toggleBtn} title="Insere sellers sintéticos no Postgres (sem Qwen)">
+            Seed sellers
           </button>
         )}
         <button onClick={() => setShowTrails(!showTrails)} style={{...headerStyles.toggleBtn, opacity: showTrails ? 1 : 0.4}} title="Toggle trails">
@@ -157,13 +184,29 @@ const headerStyles = {
 };
 
 /* ── Sidebar Filters ── */
-const Sidebar = React.memo(function Sidebar({ filters, setFilters, archetypes }) {
+const Sidebar = React.memo(function Sidebar({ filters, setFilters, archetypes, sellerArchetypes }) {
   const toggleArchetype = (key) => {
     setFilters(prev => ({
       ...prev,
       archetypes: prev.archetypes.includes(key)
         ? prev.archetypes.filter(k => k !== key)
         : [...prev.archetypes, key],
+    }));
+  };
+  const toggleSellerArchetype = (key) => {
+    setFilters(prev => ({
+      ...prev,
+      sellerArchetypes: prev.sellerArchetypes.includes(key)
+        ? prev.sellerArchetypes.filter(k => k !== key)
+        : [...prev.sellerArchetypes, key],
+    }));
+  };
+  const toggleAgentKind = (key) => {
+    setFilters(prev => ({
+      ...prev,
+      agentKinds: prev.agentKinds.includes(key)
+        ? prev.agentKinds.filter(k => k !== key)
+        : [...prev.agentKinds, key],
     }));
   };
   const toggleIntent = (key) => {
@@ -186,7 +229,21 @@ const Sidebar = React.memo(function Sidebar({ filters, setFilters, archetypes })
       </div>
 
       <div style={sidebarStyles.section}>
-        <span style={sidebarStyles.sectionTitle}>Persona Archetype</span>
+        <span style={sidebarStyles.sectionTitle}>Agent Type</span>
+        {[
+          { key: 'buyer', label: 'Buyers (compradores)' },
+          { key: 'seller', label: 'Sellers (vendedores)' },
+        ].map(k => (
+          <label key={k.key} style={sidebarStyles.checkLabel}>
+            <input type="checkbox" checked={filters.agentKinds.includes(k.key)}
+              onChange={() => toggleAgentKind(k.key)} style={{accentColor:'#3483FA'}} />
+            <span style={sidebarStyles.checkText}>{k.label}</span>
+          </label>
+        ))}
+      </div>
+
+      <div style={sidebarStyles.section}>
+        <span style={sidebarStyles.sectionTitle}>Buyer Archetype</span>
         {archetypes.map(a => (
           <label key={a.key} style={sidebarStyles.checkLabel}>
             <input type="checkbox" checked={filters.archetypes.includes(a.key)}
@@ -196,6 +253,20 @@ const Sidebar = React.memo(function Sidebar({ filters, setFilters, archetypes })
           </label>
         ))}
       </div>
+
+      {(sellerArchetypes || []).length > 0 && (
+        <div style={sidebarStyles.section}>
+          <span style={sidebarStyles.sectionTitle}>Seller Archetype</span>
+          {sellerArchetypes.map(a => (
+            <label key={a.key} style={sidebarStyles.checkLabel}>
+              <input type="checkbox" checked={filters.sellerArchetypes.includes(a.key)}
+                onChange={() => toggleSellerArchetype(a.key)} style={{accentColor: a.color}} />
+              <span style={{...sidebarStyles.dot, background: a.color}}></span>
+              <span style={sidebarStyles.checkText}>{a.label}</span>
+            </label>
+          ))}
+        </div>
+      )}
 
       <div style={sidebarStyles.section}>
         <span style={sidebarStyles.sectionTitle}>Session Intent</span>

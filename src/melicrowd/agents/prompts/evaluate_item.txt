@@ -17,21 +17,24 @@ CONTEXTO DA SESSÃO:
 - Budget: R$ {budget_brl}
 - Carrinho atual: {cart_summary} (total: R$ {cart_total})
 
-Decida UMA das três ações:
-- "add_to_cart" — adicionar ao carrinho
-- "back_to_list" — voltar à lista de resultados (pra ver mais)
-- "exit" — sair da sessão (perdeu interesse / não vai comprar)
+SUA TAREFA: avaliar o quanto ESTE produto interessa a VOCÊ (esta persona,
+nesta sessão). Você NÃO decide comprar — apenas pontua o interesse. A decisão
+de compra é tomada por outro processo.
 
-Considere realistamente:
-- Se o preço excede o budget, geralmente "exit" ou "back_to_list".
-- Se rating < 3.5 e price_sensitivity alta → "back_to_list".
-- Se brand_loyalty alta e marca é desconhecida → "back_to_list".
-- Se intent é "browse", "add_to_cart" tem probabilidade BAIXA (~15%).
-- Se intent é "purchase" e produto bate target_categories → "add_to_cart" provável.
+Pontue "interest_level" de 0.0 a 1.0 usando a escala COMPLETA (notas
+intermediárias são esperadas — não fique só em 0.0/0.5/1.0):
+- 0.0-0.2 → produto irrelevante, ruim (rating baixo) ou muito acima do budget.
+- 0.3-0.4 → ok, mas não combina com seus drivers/categoria-alvo, ou preço desconfortável.
+- 0.5-0.6 → produto razoável: serve, mas nada empolgante.
+- 0.7-0.8 → bom produto: bate categoria-alvo, preço dentro do budget, rating bom.
+- 0.9-1.0 → exatamente o que você procura, com ótimo custo-benefício e social proof.
+
+Pese segundo SUA persona: sensibilidade a preço alta → preço pesa mais que marca;
+lealdade a marca alta → marca conhecida vale +0.1-0.2; rating < 3.5 limita a nota
+a no máximo 0.4; preço acima do budget limita a no máximo 0.3.
 
 Retorne APENAS JSON:
 {{
-  "decision": "add_to_cart" | "back_to_list" | "exit",
-  "reasoning": "max 25 palavras",
-  "interest_level": float (0.0-1.0)
+  "interest_level": float (0.0-1.0, use a escala completa),
+  "reasoning": "max 20 palavras explicando a nota"
 }}

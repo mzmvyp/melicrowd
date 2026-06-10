@@ -132,6 +132,13 @@ class AgentState(BaseModel):
     # Outcome
     outcome: SessionOutcome | None = None
     purchase_total_brl: float = 0.0
+    # Validação contra o MeliSim: separa compra CONFIRMADA pelo gateway de
+    # intenção de compra (order 4xx ou item sintético ``fallback-*``).
+    # ``purchase_total_brl`` segue somando ambos (semântica de funil/AOV);
+    # ``confirmed_total_brl`` é o número que bate com o banco do MeliSim.
+    orders_confirmed: int = 0
+    orders_rejected: int = 0
+    confirmed_total_brl: float = 0.0
 
     # Telemetria
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

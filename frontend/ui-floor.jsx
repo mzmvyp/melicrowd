@@ -75,9 +75,10 @@ const AgentDot = React.memo(function AgentDot({ agent, onClick, dimmed, showLabe
         ? '#22C55E'
         : agent.persona.color;
 
+  const storeLabel = agent.persona.storeName ? ` @ ${agent.persona.storeName}` : '';
   const tooltipName = isIdle
     ? `${agent.workerId} — idle`
-    : `${agent.workerId || agent.id} • ${agent.persona.name} (${agent.sessionId})`;
+    : `${agent.workerId || agent.id} • ${agent.persona.name}${storeLabel} (${agent.sessionId})`;
 
   return (
     <div
@@ -190,11 +191,22 @@ const FloorPlan = React.memo(function FloorPlan({ agents, stations, onAgentClick
   // Compute dimmed set based on filters
   const dimmedAgents = React.useMemo(() => {
     const set = new Set();
-    const hasFilters = filters.archetypes.length > 0 || filters.intents.length > 0 || filters.errorsOnly || filters.searchId;
+    const hasFilters = filters.agentKinds?.length > 0
+      || filters.archetypes.length > 0
+      || filters.sellerArchetypes?.length > 0
+      || filters.intents.length > 0
+      || filters.errorsOnly
+      || filters.searchId;
     if (!hasFilters) return set;
     agents.forEach(a => {
       let matches = true;
-      if (filters.archetypes.length > 0 && !filters.archetypes.includes(a.persona.archetype)) matches = false;
+      const kind = a.kind || 'buyer';
+      if (filters.agentKinds?.length > 0 && !filters.agentKinds.includes(kind)) matches = false;
+      if (kind === 'seller') {
+        if (filters.sellerArchetypes?.length > 0 && !filters.sellerArchetypes.includes(a.persona.archetype)) matches = false;
+      } else if (filters.archetypes.length > 0 && !filters.archetypes.includes(a.persona.archetype)) {
+        matches = false;
+      }
       if (filters.intents.length > 0 && !filters.intents.includes(a.intent)) matches = false;
       if (filters.errorsOnly && !a.hasError) matches = false;
       if (filters.searchId

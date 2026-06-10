@@ -197,12 +197,22 @@ async def _evaluate_alert(
         return NotificationDecisionResponse(action="ignore", reasoning="fallback")
 
 
-async def _set_station(worker_id: str | None, station: str) -> None:
+async def _set_station(
+    worker_id: str | None,
+    station: str,
+    *,
+    persona: SellerPersona | None = None,
+) -> None:
     """Atualiza station do worker no LiveAgentTracker."""
     if not worker_id:
         return
     try:
-        await get_tracker().update_worker_station(worker_id, station, kind="seller")
+        await get_tracker().update_worker_station(
+            worker_id,
+            station,
+            kind="seller",
+            seller_persona=persona,
+        )
     except AttributeError:
         # Compat: se ainda não tem o método novo, ignora.
         pass
@@ -238,21 +248,21 @@ async def run_seller_session(
     )
 
     # 1. Login
-    await _set_station(worker_id, "seller_login")
+    await _set_station(worker_id, "seller_login", persona=persona)
     if not await auth.run(state):
         state.ended_at = datetime.now(timezone.utc)
         return state
 
     # 2. Audit inventory
-    await _set_station(worker_id, "seller_audit")
+    await _set_station(worker_id, "seller_audit", persona=persona)
     await audit_inventory.run(state)
 
     # 3. Check notifications
-    await _set_station(worker_id, "seller_check_notifications")
+    await _set_station(worker_id, "seller_check_notifications", persona=persona)
     await check_notifications.run(state)
 
     # 4. Qwen: decide foco
-    await _set_station(worker_id, "seller_decide")
+    await _set_station(worker_id, "seller_decide", persona=persona)
     focus_resp = await _decide_focus(state)
     state.session_focus = focus_resp.focus
     state.plan_create_n = focus_resp.create_n_products
@@ -264,16 +274,16 @@ async def run_seller_session(
             decision = await _evaluate_alert(state, i)
             state.notifications_handled += 1
             if decision.action == "restock":
-                await _set_station(worker_id, "seller_restock")
+                await _set_station(worker_id, "seller_restock", persona=persona)
                 await restock.run(state, product_id=alert.product_id, delta=max(20, decision.delta))
             elif decision.action == "suspend":
-                await _set_station(worker_id, "seller_suspend")
+                await _set_station(worker_id, "seller_suspend", persona=persona)
                 await suspend.run(state, product_id=alert.product_id)
             # action == "ignore" → não faz nada
 
     # 6. Expand: cria produtos novos
     if state.session_focus == "expand" or focus_resp.create_n_products > 0:
-        await _set_station(worker_id, "seller_create_product")
+        await _set_station(worker_id, "seller_create_product", persona=persona)
         catalog_room = persona.max_catalog_size - len(state.inventory)
         n_to_create = min(focus_resp.create_n_products, max(0, catalog_room))
         for _ in range(n_to_create):
@@ -281,7 +291,7 @@ async def run_seller_session(
 
     # 7. Promo: atualiza preços
     if focus_resp.update_n_prices > 0 and state.inventory:
-        await _set_station(worker_id, "seller_update_price")
+        await _set_station(worker_id, "seller_update_price", persona=persona)
         sample = random.sample(
             state.inventory, k=min(focus_resp.update_n_prices, len(state.inventory))
         )
@@ -289,7 +299,7 @@ async def run_seller_session(
             await update_price.run(state, product_id=product.product_id)
 
     # 8. Done
-    await _set_station(worker_id, "seller_done")
+    await _set_station(worker_id, "seller_done", persona=persona)
     state.ended_at = datetime.now(timezone.utc)
     LOGGER.info(
         "seller session end",

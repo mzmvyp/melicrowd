@@ -53,13 +53,18 @@ QWEN_NODES = frozenset({"decide_session", "evaluate_item", "checkout_decision", 
 
 
 def _with_tracking(node_name: str, node_fn: NodeFn) -> NodeFn:
-    """Envolve um nó para fazer pre-update no tracker.
+    """Envolve um nó para fazer pre-update **visual** no tracker.
 
     Sequência:
-        1. tracker.upsert_from_state(state, station=node_name)  ← antes
-        2. tracker.record_node_enter(node_name)                  ← antes
-        3. resultado = await node_fn(state)                      ← trabalho real
-        4. ... astream emite update no fim, runner faz record_node_exit
+        1. tracker.upsert_from_state(state, station=node_name)  ← antes (só posição visual)
+        2. resultado = await node_fn(state)                      ← trabalho real
+        3. ... astream emite update no fim; o runner conta a visita
+           (``record_node_enter``) e a duração (``record_node_exit``).
+
+    **Importante:** a contagem de visitas (``record_node_enter``) é feita
+    SOMENTE no ``runner.py`` quando o update chega. Antes era feita também
+    aqui, o que dobrava ``visits_total`` no tracker e divergia do
+    ``node_visits_total`` do Prometheus (contado 1× no runner) por um fator 2.
     """
 
     async def wrapped(state: AgentState) -> NodeUpdate:
@@ -72,7 +77,6 @@ def _with_tracking(node_name: str, node_fn: NodeFn) -> NodeFn:
                 is_thinking=node_name in QWEN_NODES,
                 thinking_progress=0.05 if node_name in QWEN_NODES else 0.0,
             )
-            await tracker.record_node_enter(node_name)
         except Exception as exc:  # noqa: BLE001  — tracker é best-effort
             LOGGER.debug(
                 "tracker pre-update failed",
@@ -84,16 +88,8 @@ def _with_tracking(node_name: str, node_fn: NodeFn) -> NodeFn:
     return wrapped
 
 
-def build_agent_graph(checkpointer: Any | None = None) -> Any:
-    """Constrói o grafo compilado do agente.
-
-    Args:
-        checkpointer: instância de ``BaseCheckpointSaver``. Se ``None``,
-            usa ``MemorySaver``.
-
-    Returns:
-        Grafo compilado pronto para ``ainvoke()``.
-    """
+def _build_state_graph() -> StateGraph:
+    """Monta o ``StateGraph`` (nós + arestas) sem compilar."""
     g: StateGraph = StateGraph(AgentState)
 
     # Nodes — todos wrappados pra fazer pre-update no tracker.
@@ -151,4 +147,38 @@ def build_agent_graph(checkpointer: Any | None = None) -> Any:
         {"write_review": "write_review", "end": END},
     )
 
-    return g.compile(checkpointer=checkpointer or MemorySaver())
+    return g
+
+
+def build_agent_graph(checkpointer: Any | None = None) -> Any:
+    """Constrói o grafo compilado do agente.
+
+    Args:
+        checkpointer: instância de ``BaseCheckpointSaver``. Se ``None``,
+            usa ``MemorySaver``.
+
+    Returns:
+        Grafo compilado pronto para ``ainvoke()``.
+    """
+    return _build_state_graph().compile(checkpointer=checkpointer or MemorySaver())
+
+
+_default_graph: Any | None = None
+
+
+def get_default_graph() -> Any:
+    """Retorna o grafo compilado default (SEM checkpointer), compilado 1× e reusado.
+
+    A compilação do ``StateGraph`` é cara e era refeita a cada sessão no
+    ``runner``; um único grafo compilado atende todas as sessões em paralelo.
+
+    **Sem checkpointer, deliberadamente:** um ``MemorySaver`` único compartilhado
+    reteria os checkpoints de TODAS as sessões (thread_id = session_id novo a
+    cada sessão, nunca evictado) — vazamento de memória sem limite em runs
+    longos. Como nada resume sessões no fluxo default, compilamos sem saver.
+    Para replay/recovery (ex.: Redis), injete via ``build_agent_graph(checkpointer)``.
+    """
+    global _default_graph  # noqa: PLW0603
+    if _default_graph is None:
+        _default_graph = _build_state_graph().compile()
+    return _default_graph

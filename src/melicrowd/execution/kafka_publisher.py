@@ -159,6 +159,11 @@ class KafkaPublisher:
             "outcome": state.outcome.value if state.outcome else "unknown",
             "intent": state.session_intent.value if state.session_intent else None,
             "purchase_total_brl": state.purchase_total_brl,
+            # Validação MeliSim: orders aceitas pelo gateway vs rejeitadas/sintéticas.
+            # confirmed_total_brl é o valor que deve bater com o banco do MeliSim.
+            "orders_confirmed": state.orders_confirmed,
+            "orders_rejected": state.orders_rejected,
+            "confirmed_total_brl": state.confirmed_total_brl,
             "duration_seconds": duration,
             "qwen_calls_count": state.qwen_calls_count,
             "qwen_total_latency_ms": state.qwen_total_latency_ms,

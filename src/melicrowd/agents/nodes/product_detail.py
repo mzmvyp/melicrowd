@@ -15,6 +15,7 @@ from loguru import logger
 
 from melicrowd.agents.state import AgentState, NodeUpdate, Product
 from melicrowd.execution.melisim_client import get_client
+from melicrowd.execution.timing import think_time
 
 LOGGER = logger.bind(module="agents.nodes.product_detail")
 
@@ -53,6 +54,9 @@ async def run(state: AgentState) -> NodeUpdate:
         )
         target = state.target_categories[0] if state.target_categories else None
         full = _synthetic_product(target)
+
+    # Humano lê a página do produto (fotos, descrição, reviews) antes de decidir.
+    await think_time(state.persona)
 
     return {
         "current_page": "product_detail",

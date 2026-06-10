@@ -3,14 +3,14 @@
 Estratégia:
 - Erros transitórios (timeout, connection reset): 3 tentativas com backoff
   exponencial 1s → 2s → 4s.
-- JSON inválido: 2 tentativas (Qwen às vezes adiciona ``<thinking>`` tags ou
-  texto de explicação antes do JSON; o parser tenta extrair).
-- Esgotadas as retries: cai pro fallback procedural (responsabilidade do
-  caller, não desta camada).
+- JSON inválido **não** é retentado: com ``format=json`` do Ollama, JSON
+  malformado quase sempre significa truncamento por ``num_predict`` — repetir
+  raramente resolve e só segura a vaga do semáforo por mais ~3×timeout. O
+  caller cai direto no fallback procedural (responsabilidade dele, não desta
+  camada).
 """
 from __future__ import annotations
 
-import json
 from typing import Final
 
 import httpx
@@ -27,16 +27,16 @@ LOGGER: Final = logger.bind(module="llm.retry")
 
 
 # Exceções consideradas transitórias e elegíveis a retry.
+# Nota: ``json.JSONDecodeError`` foi DELIBERADAMENTE removido — ver docstring.
 TRANSIENT_EXCEPTIONS: Final[tuple[type[Exception], ...]] = (
     httpx.TimeoutException,
     httpx.NetworkError,
     httpx.RemoteProtocolError,
-    json.JSONDecodeError,
 )
 
 
 def transient_retry() -> AsyncRetrying:
-    """Política de retry para erros de transporte/JSON.
+    """Política de retry para erros de transporte (não para JSON inválido).
 
     Returns:
         ``AsyncRetrying`` configurado.

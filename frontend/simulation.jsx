@@ -24,6 +24,14 @@ const ARCHETYPES = [
   { key: 'researcher', label: 'Researcher (B)', color: '#22C55E' },
 ];
 
+/* Seller archetypes (espelho de live_tracker._SELLER_ARCHETYPE_BY_STRATEGY) */
+const SELLER_ARCHETYPES = [
+  { key: 'seller_idle', label: 'Seller Idle', color: '#F97316' },
+  { key: 'aggressive_seller', label: 'Aggressive (preço)', color: '#EF4444' },
+  { key: 'standard_seller', label: 'Standard', color: '#F97316' },
+  { key: 'premium_seller', label: 'Premium', color: '#A855F7' },
+];
+
 /* ── Stations: ids correspondem 1:1 aos node_name do graph.py do backend.
    IMPORTANTE: backend envia `station = node_name` (15 valores possíveis). ── */
 const STATIONS = [
@@ -77,6 +85,9 @@ const EMPTY_KPIS = {
   idleWorkers: 0,
   utilization: '0.0',
   stationLoad: {},
+  sellerTotalWorkers: 0,
+  sellerBusyWorkers: 0,
+  sellerSessionsPerMin: 0,
 };
 
 /* ── REST helpers (control plane) ── */
@@ -85,6 +96,21 @@ async function apiPost(path, params) {
     const url = new URL(API_URL + path);
     Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    return r.ok ? await r.json() : { error: `HTTP ${r.status}` };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+async function apiPostJson(path, body, params) {
+  try {
+    const url = new URL(API_URL + path);
+    Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
     return r.ok ? await r.json() : { error: `HTTP ${r.status}` };
   } catch (e) {
     return { error: String(e) };
@@ -103,6 +129,8 @@ function useSimulation() {
   const [showLabels, setShowLabels] = React.useState(true);
   const [confettiMode, setConfettiMode] = React.useState(false);
   const [poolRunning, setPoolRunning] = React.useState(false);
+  const [sellerCount, setSellerCount] = React.useState(5);
+  const [sellerPoolRunning, setSellerPoolRunning] = React.useState(false);
 
   const wsRef = React.useRef(null);
   const reconnectTimeoutRef = React.useRef(null);
@@ -200,8 +228,21 @@ function useSimulation() {
         if (!cancelled) setPoolRunning(false);
       }
     };
+    const pollSellers = async () => {
+      try {
+        const r = await fetch(`${API_URL}/sellers/pool/status`);
+        if (r.ok && !cancelled) {
+          const data = await r.json();
+          setSellerPoolRunning(Boolean(data?.running));
+          if (data?.target_workers > 0) setSellerCount(data.target_workers);
+        }
+      } catch {
+        if (!cancelled) setSellerPoolRunning(false);
+      }
+    };
     tick();
-    const id = setInterval(tick, 2000);
+    pollSellers();
+    const id = setInterval(() => { tick(); pollSellers(); }, 2000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
@@ -212,6 +253,14 @@ function useSimulation() {
   const stopPool = React.useCallback(async () => apiPost('/stop', { graceful: true }), []);
   const scalePool = React.useCallback(async (agents) => apiPost('/scale', { agents }), []);
   const seedPersonas = React.useCallback(async (count) => apiPost('/personas/generate', { count }), []);
+  const startSellers = React.useCallback(async (workers) => {
+    return apiPost('/sellers/start', { workers: workers ?? sellerCount });
+  }, [sellerCount]);
+  const stopSellers = React.useCallback(async () => apiPost('/sellers/stop', { graceful: true }), []);
+  const scaleSellers = React.useCallback(async (workers) => apiPost('/sellers/scale', { workers }), []);
+  const seedSellers = React.useCallback(async (count) => {
+    return apiPostJson('/sellers/seed-synthetic', { count });
+  }, []);
 
   return {
     agents,
@@ -231,6 +280,17 @@ function useSimulation() {
       setAgentCount,
       scalePool,
       seedPersonas,
+      sellerCount,
+      setSellerCount,
+      sellerPoolRunning,
+      startSellers,
+      stopSellers,
+      scaleSellers,
+      seedSellers,
+      setSellerPoolRunning: async (next) => {
+        if (next) await startSellers();
+        else await stopSellers();
+      },
       // Speed/trails/labels are pure client UI toggles (no backend equivalent)
       speed: 1,
       setSpeed: () => {}, // no-op: real backend speed is real time
@@ -239,6 +299,7 @@ function useSimulation() {
       confettiMode, setConfettiMode,
     },
     archetypes: ARCHETYPES,
+    sellerArchetypes: SELLER_ARCHETYPES,
   };
 }
 
@@ -247,6 +308,7 @@ Object.assign(window, {
   useSimulation,
   STATIONS,
   ARCHETYPES,
+  SELLER_ARCHETYPES,
   INTENTS,
   WS_URL,
   API_URL,

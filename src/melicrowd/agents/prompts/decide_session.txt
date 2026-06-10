@@ -13,25 +13,28 @@ CONTEXTO ATUAL:
 - Dia da semana: {weekday}
 - Período: {period_of_day}
 
-Decida sua INTENÇÃO MACRO ao acessar o e-commerce agora. Seja realista — humano normalmente NÃO entra com intenção de comprar; entra mais pra navegar, comparar, pesquisar.
+SUA INTENÇÃO NESTA SESSÃO JÁ FOI DETERMINADA: **{session_intent}**
+- browse = passeando sem alvo definido
+- research = pesquisando algo específico (ainda sem decidir comprar)
+- compare = decidido a comprar, comparando opções
+- purchase = decidido a comprar AGORA
 
-Distribuição esperada (calibrada com benchmarks de e-commerce BR e ajustada
-para dar conversion realista de portfólio — ~25-40% chegando ao checkout):
-- browse (passeando, sem alvo): 25%
-- research (pesquisando algo específico): 25%
-- compare (decidido a comprar mas comparando): 25%
-- purchase (decidido a comprar AGORA): 25%
+SUA TAREFA: dado esse intent e SUA persona, planeje a visita. Você NÃO escolhe
+o intent — apenas o contextualiza de forma coerente e humana.
 
-Escolha COERENTE com sua persona — pessoa muito digital que visita 7x por semana
-PODE estar em qualquer um dos 4 (variedade de motivos). Pessoa que visita 1x por
-semana e tem alto purchase_drivers tende a "purchase" ou "compare". NÃO assuma
-que browse é o default — humano vai ao e-commerce com objetivo na maioria das vezes.
+Diretrizes:
+- target_categories: 1-3 categorias coerentes com seus interesses/categorias
+  preferidas (e com o período do dia, se fizer sentido).
+- budget_brl: null se browse; se research/compare, um teto exploratório
+  realista pra sua classe; se purchase, o valor que você de fato pretende
+  gastar (coerente com classe {income_class} e sensibilidade a preço).
+- purchase_probability: sua chance subjetiva de sair comprando HOJE
+  (browse baixa ~0.05-0.15, research ~0.15-0.3, compare ~0.3-0.6, purchase ~0.6-0.9).
 
 Retorne APENAS JSON (sem markdown, sem texto antes/depois):
 {{
-  "session_intent": "browse" | "research" | "compare" | "purchase",
-  "target_categories": [1-3 categorias coerentes com seu perfil],
-  "budget_brl": float | null (null se browse, sempre número se purchase),
+  "target_categories": [1-3 categorias],
+  "budget_brl": float | null,
   "purchase_probability": float (0.0-1.0),
   "reasoning": "explicação CURTA (max 25 palavras)"
 }}

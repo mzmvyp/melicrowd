@@ -26,6 +26,23 @@ LOGGER: Final = logger.bind(module="agents.qwen_runner")
 T = TypeVar("T", bound=BaseModel)
 
 
+def qwen_trace_fields(state: AgentState) -> dict[str, Any]:
+    """Campos de trace Qwen para incluir no ``NodeUpdate`` retornado pelo nó.
+
+    **Obrigatório em todo nó que chama ``run_qwen_node``.** LangGraph só
+    propaga o que o nó RETORNA — ``record_decision`` muta a cópia local do
+    state e essa mutação morre com o nó. Sem devolver estes campos, o
+    ``final_state`` chega com ``qwen_calls_count=0`` e ``decision_trace=[]``
+    (bug histórico: TODAS as sessões persistidas/Kafka sem trace de decisão,
+    replay do Streamlit vazio, eventos "qwen" do Live Floor nunca emitidos).
+    """
+    return {
+        "qwen_calls_count": state.qwen_calls_count,
+        "qwen_total_latency_ms": state.qwen_total_latency_ms,
+        "decision_trace": state.decision_trace,
+    }
+
+
 async def run_qwen_node(
     *,
     state: AgentState,
@@ -33,6 +50,7 @@ async def run_qwen_node(
     prompt: str,
     response_model: type[T],
     fallback: Callable[[AgentState], T],
+    max_output_tokens: int | None = None,
 ) -> T:
     """Roda um nó Qwen com fallback procedural garantido.
 
@@ -42,6 +60,8 @@ async def run_qwen_node(
         prompt: prompt completo já renderizado com placeholders.
         response_model: classe Pydantic para validar a resposta.
         fallback: função que retorna uma resposta procedural caso Qwen falhe.
+        max_output_tokens: ``num_predict`` da chamada (decisões usam o budget
+            menor de ``settings.qwen_decision_max_tokens``).
 
     Returns:
         Instância validada de ``response_model``. Se Qwen falhou, vem do fallback.
@@ -71,7 +91,7 @@ async def run_qwen_node(
         pass
 
     try:
-        call = await generate_json(prompt)
+        call = await generate_json(prompt, max_output_tokens=max_output_tokens)
         raw = call.raw
         parsed = call.response
         latency_ms = call.latency_ms

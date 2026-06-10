@@ -17,6 +17,7 @@ from loguru import logger
 
 from melicrowd.config import settings
 from melicrowd.execution.kafka_publisher import get_publisher
+from melicrowd.llm.qwen_client import close_client as close_qwen_client
 from melicrowd.logging_setup import configure_logging
 from melicrowd.orchestrator.lifecycle import install_signal_handlers
 from melicrowd.orchestrator.pool import AgentPool
@@ -57,6 +58,7 @@ async def _run() -> None:
     if pool is not None:
         await pool.shutdown(timeout=30.0)
     await publisher.stop()
+    await close_qwen_client()
     LOGGER.info("orchestrator stopped cleanly")
 
 

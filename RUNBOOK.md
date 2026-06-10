@@ -9,7 +9,7 @@
 ```bash
 # 1. Pré-requisitos
 docker compose version       # v2+
-ollama list                  # confirma qwen3:14b baixado
+ollama list                  # confirma qwen3:8b baixado
 docker network ls            # melisim_melisim e melisimlake-net devem existir
 
 # 2. Subir vizinhos (se ainda não estiverem rodando)
@@ -69,8 +69,8 @@ curl http://localhost:11434/api/tags
 # Lista modelos baixados
 ollama list
 
-# Se qwen3:14b não estiver, baixe (~9GB, demora):
-ollama pull qwen3:14b
+# Se qwen3:8b não estiver, baixe (~5GB):
+ollama pull qwen3:8b
 ```
 
 Quando o Qwen está saturado, MeliCrowd cai em fallback procedural — sessões

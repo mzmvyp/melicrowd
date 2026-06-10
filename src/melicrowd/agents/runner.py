@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 
 from loguru import logger
 
-from melicrowd.agents.graph import build_agent_graph
+from melicrowd.agents.graph import build_agent_graph, get_default_graph
 from melicrowd.agents.state import AgentState
 from melicrowd.config import settings
 from melicrowd.observability import metrics
@@ -56,7 +56,9 @@ async def run_session(
     """
     sid = session_id or uuid4()
     initial = AgentState(session_id=sid, persona=persona, worker_id=worker_id)
-    graph = build_agent_graph(checkpointer)
+    # Grafo default é compilado 1× e reusado (thread_id separa as sessões).
+    # Só recompila quando um checkpointer custom é injetado (ex.: Redis em testes).
+    graph = build_agent_graph(checkpointer) if checkpointer is not None else get_default_graph()
     config = {"configurable": {"thread_id": str(sid)}, "recursion_limit": 100}
     tracker = get_tracker()
 
@@ -68,6 +70,10 @@ async def run_session(
     final_state_dict: dict[str, Any] = initial.model_dump()
     last_node_started_at: float | None = None
     last_node_name: str | None = None
+    # errors_encountered é cumulativo no state. Guardamos o tamanho já contado
+    # para registrar SÓ os erros novos por nó — senão, após o 1º erro, todo nó
+    # subsequente reincrementaria node_errors_total e geraria exits duplicados.
+    prev_error_count = 0
 
     async for chunk in graph.astream(initial.model_dump(), config=config, stream_mode="updates"):
         if not isinstance(chunk, dict):
@@ -105,12 +111,15 @@ async def run_session(
                 )
                 continue
 
-            # NOC: erros capturados no state.errors_encountered viram counter.
-            if tracking_state.errors_encountered:
-                metrics.node_errors_total.labels(
-                    station=node_name, error_type="agent_error"
-                ).inc()
+            # NOC: conta apenas os erros NOVOS deste nó (delta vs. o já contado).
+            error_count = len(tracking_state.errors_encountered)
+            if error_count > prev_error_count:
+                for _ in range(error_count - prev_error_count):
+                    metrics.node_errors_total.labels(
+                        station=node_name, error_type="agent_error"
+                    ).inc()
                 await tracker.record_node_exit(node_name, had_error=True)
+                prev_error_count = error_count
 
             is_qwen = node_name in QWEN_NODES
             await tracker.upsert_from_state(
@@ -190,11 +199,15 @@ async def _emit_events_for_step(
             worker_id=worker_id,
         )
     elif node_name == "pay" and state.outcome and state.outcome.value == "purchased":
+        total_orders = state.orders_confirmed + state.orders_rejected
+        confirmed_note = (
+            f" ({state.orders_confirmed}/{total_orders} confirmadas)" if total_orders else ""
+        )
         await tracker.push_event(
             session_id=sid,
             persona_name=persona_name,
             event_type="purchased",
-            detail=f"R$ {state.purchase_total_brl:.2f}",
+            detail=f"R$ {state.purchase_total_brl:.2f}{confirmed_note}",
             station=node_name,
             worker_id=worker_id,
         )

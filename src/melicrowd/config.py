@@ -37,16 +37,29 @@ class Settings(BaseSettings):
     # LLM (Qwen via Ollama)
     # ------------------------------------------------------------------
     qwen_base_url: str = "http://host.docker.internal:11434"
-    qwen_model: str = "qwen3:14b"
-    # Qwen é caro. Por default, evaluate_item (3-8 calls/sessão) usa fallback
-    # procedural (já modulado por persona). decide_session e checkout_decision
-    # continuam usando Qwen — são os pontos de maior impacto narrativo.
-    qwen_evaluate_item_enabled: bool = False
+    # qwen3:8b é o default validado por benchmark: ~2x o throughput paralelo do
+    # 14b (1.98 vs 1.04 decisões/s @ concorrência 8), metade da latência
+    # (1392 vs 2084 ms) e 100% de JSON válido — qualidade indistinguível nas
+    # decisões de classificação curtas desta simulação. Veja scripts/bench_models.py.
+    qwen_model: str = "qwen3:8b"
+    # evaluate_item é HÍBRIDO (LLM pontua, procedural sorteia): o Qwen devolve
+    # um interest_level 0-1 (juízo qualitativo, determinístico) e a AMOSTRAGEM
+    # da decisão continua procedural calibrada — o score só modula a
+    # probabilidade base (fator 0.4-1.6×, centrado em 1.0 para interest=0.5).
+    # Isso resolve o "tudo-ou-nada" do LLM em temperatura baixa: a taxa
+    # agregada fica na banda 3-8% mesmo com o modelo respondendo sempre igual
+    # para o mesmo produto. Se o Qwen falhar/saturar, o fallback usa interest
+    # neutro (0.5) → degrada para o procedural puro SEM mudar a calibração.
+    qwen_evaluate_item_enabled: bool = True
     # Mesma lógica: Qwen na decisão de checkout estava devolvendo "abandon"
     # quase sempre (interpretação conservadora do prompt). Procedural com
     # base 0.45 ajustada por intent/persona dá 25-40% conversion consistente.
     qwen_checkout_decision_enabled: bool = False
-    qwen_max_output_tokens: int = 256  # num_predict no Ollama
+    qwen_max_output_tokens: int = 256  # num_predict no Ollama (geração longa: reviews)
+    # Nós de DECISÃO retornam JSON de ~60-110 tokens; 160 cobre com folga e
+    # corta a latência vs 256 (a geração para no fim do JSON, mas o budget
+    # menor protege contra divagação e libera o batch do Ollama mais cedo).
+    qwen_decision_max_tokens: int = Field(default=160, ge=32, le=1024)
     qwen_temperature: float = 0.3  # baixo = JSON mais confiável
     # Qwen 3 thinking mode: gera 500-2000 tokens de raciocínio ANTES do JSON.
     # Com num_predict pequeno, consome todo o budget e retorna {} vazio.
@@ -99,6 +112,11 @@ class Settings(BaseSettings):
     session_recycle_min_seconds: int = Field(default=30, ge=1)
     session_recycle_max_seconds: int = Field(default=300, ge=1)
     auth_recycle_every_n_sessions: int = Field(default=5, ge=1)
+    # Escala do timing humano intra-sessão (execution/timing.py): think time,
+    # digitação e scroll entre nós procedurais. 1.0 = realismo pleno (sessões
+    # de minutos); 0.3 = default — pacing visível no Live Floor (~0.6-2.4s por
+    # nó) sem derrubar sessões/hora; 0.0 = desliga (modo CI/teste de carga).
+    human_timing_scale: float = Field(default=0.3, ge=0.0, le=3.0)
 
     # ------------------------------------------------------------------
     # Error injection

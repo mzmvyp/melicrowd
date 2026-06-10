@@ -5,15 +5,23 @@ e que validações Pydantic protegem contra valores inválidos.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 from pydantic import ValidationError
 
 from melicrowd.config import Settings
 
 
-def test_settings_loads_with_defaults() -> None:
-    s = Settings()
-    assert s.qwen_model == "qwen3:14b"
+def test_settings_loads_with_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Isola dos overrides de ambiente (.env / OS env) para testar APENAS os
+    # defaults definidos no código — senão, um MELICROWD_* no .env do dev
+    # (ex.: QWEN_MODEL=qwen3:8b) faz este teste falhar sem haver bug.
+    for key in list(os.environ):
+        if key.startswith("MELICROWD_"):
+            monkeypatch.delenv(key, raising=False)
+    s = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert s.qwen_model == "qwen3:8b"
     assert s.qwen_max_concurrent == 12
     assert s.orchestrator_autostart is True
     assert s.default_agent_count == 50

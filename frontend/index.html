@@ -81,12 +81,14 @@
 
     function App() {
       const sim = useSimulation();
-      const { agents, stations, events, kpis, controls, archetypes, connectionStatus } = sim;
+      const { agents, stations, events, kpis, controls, archetypes, sellerArchetypes, connectionStatus } = sim;
 
       const [selectedAgent, setSelectedAgent] = React.useState(null);
       const [followedAgentId, setFollowedAgentId] = React.useState(null);
       const [filters, setFilters] = React.useState({
+        agentKinds: [],
         archetypes: [],
+        sellerArchetypes: [],
         intents: [],
         errorsOnly: false,
         searchId: '',
@@ -140,6 +142,7 @@
             controls={controls}
             connectionStatus={connectionStatus}
             onSeedPersonas={(n) => controls.seedPersonas(n)}
+            onSeedSellers={(n) => controls.seedSellers(n)}
           />
 
           {/* Topology view link (canto superior direito do main) */}
@@ -162,7 +165,7 @@
           {/* Main content area */}
           <div style={appStyles.main}>
             {/* Sidebar */}
-            <Sidebar filters={filters} setFilters={setFilters} archetypes={archetypes} />
+            <Sidebar filters={filters} setFilters={setFilters} archetypes={archetypes} sellerArchetypes={sellerArchetypes} />
 
             {/* Floor plan area */}
             <div style={appStyles.floorWrapper}>

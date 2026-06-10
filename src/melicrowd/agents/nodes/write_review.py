@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from melicrowd.agents.prompts import WRITE_REVIEW
-from melicrowd.agents.qwen_runner import run_qwen_node
+from melicrowd.agents.qwen_runner import qwen_trace_fields, run_qwen_node
 from melicrowd.agents.state import AgentState, NodeUpdate
 
 
@@ -57,4 +57,4 @@ async def run(state: AgentState) -> NodeUpdate:
         response_model=WriteReviewResponse,
         fallback=_fallback,
     )
-    return {"current_page": "write_review"}
+    return {**qwen_trace_fields(state), "current_page": "write_review"}

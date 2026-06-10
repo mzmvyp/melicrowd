@@ -49,6 +49,12 @@ class SessionRepository:
             errors_encountered=state.errors_encountered,
         )
         self.session.add(session_row)
+        # Flush da sessão ANTES das decisions (mesma transação): sem
+        # relationship() no ORM, o unit-of-work não garante a ordem de INSERT
+        # entre mappers — o INSERT de decisions podia preceder o de sessions e
+        # violar o FK ``decisions_session_id_fkey``. Latente até decision_trace
+        # passar a chegar preenchido (antes vinha sempre vazio).
+        await self.session.flush()
 
         for record in state.decision_trace:
             self.session.add(_decision_to_orm(state.session_id, state.persona.persona_id, record))

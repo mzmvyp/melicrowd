@@ -8,7 +8,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from typing import Final
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from loguru import logger
 
@@ -45,15 +45,19 @@ class SessionScheduler:
             return None
 
         publisher = get_publisher()
-
-        # Constrói state inicial pra publicar session_started imediatamente.
-        sessions_count = self._sessions_per_persona[persona.persona_id]
         self._sessions_per_persona[persona.persona_id] += 1
 
+        # Publica session_started IMEDIATAMENTE, com o state inicial — antes de
+        # rodar a sessão. Assim o timestamp de ingestão no data lake é o início
+        # real e, se a sessão crashar no meio, o evento "started" ainda foi emitido.
+        # O mesmo session_id é repassado ao runner para casar started/ended.
+        sid = uuid4()
+        initial_state = AgentState(session_id=sid, persona=persona, worker_id=worker_id)
+        on_session_started(initial_state)
+        await publisher.session_started(initial_state)
+
         try:
-            final_state = await run_session(persona, worker_id=worker_id)
-            on_session_started(final_state)
-            await publisher.session_started(final_state)
+            final_state = await run_session(persona, session_id=sid, worker_id=worker_id)
             for record in final_state.decision_trace:
                 await publisher.decision_made(final_state, record)
             await publisher.session_ended(final_state)

@@ -3,10 +3,14 @@
 Expõe ``generate_json()`` que:
 1. Adquire vaga do ``QwenPool`` (semaphore).
 2. Chama Qwen com ``format=json`` (Ollama-native JSON enforcement).
-3. Parse com ``json.loads`` + retries via tenacity.
+3. Parse com ``json.loads`` (JSON inválido NÃO é retentado — cai no fallback).
 4. Mede latência e registra trace básico.
 
-Erros transitórios sobem após 3 tentativas. Caller é responsável pelo fallback.
+Erros de transporte (timeout/rede) sobem após 3 tentativas. JSON inválido sobe
+na 1ª. Em ambos os casos o caller é responsável pelo fallback procedural.
+
+As chamadas HTTP usam um ``httpx.AsyncClient`` compartilhado (keep-alive) —
+criar um client novo por chamada desperdiçava handshake TCP a cada request.
 """
 from __future__ import annotations
 
@@ -47,6 +51,7 @@ async def generate_json(
     *,
     pool: QwenPool | None = None,
     timeout: float | None = None,
+    max_output_tokens: int | None = None,
 ) -> QwenCall:
     """Chama Qwen e retorna JSON parseado.
 
@@ -54,13 +59,16 @@ async def generate_json(
         prompt: prompt completo (já preenchido com placeholders).
         pool: pool semaphore. Default: singleton ``get_pool()``.
         timeout: timeout em segundos. Default: ``settings.qwen_timeout_seconds``.
+        max_output_tokens: ``num_predict`` desta chamada. Default:
+            ``settings.qwen_max_output_tokens``. Nós de decisão passam o valor
+            menor (``settings.qwen_decision_max_tokens``) — JSON curto.
 
     Returns:
         ``QwenCall`` com response parseado e metadados.
 
     Raises:
         httpx.HTTPError: erro de rede após 3 retries.
-        json.JSONDecodeError: Qwen não retornou JSON válido após 3 retries.
+        json.JSONDecodeError: Qwen não retornou JSON válido (sem retry).
     """
     pool = pool or get_pool()
     timeout = timeout or settings.qwen_timeout_seconds
@@ -71,7 +79,9 @@ async def generate_json(
         async for attempt in transient_retry():
             with attempt:
                 attempts = attempt.retry_state.attempt_number
-                raw = await _call_ollama(prompt, timeout=timeout)
+                raw = await _call_ollama(
+                    prompt, timeout=timeout, max_output_tokens=max_output_tokens
+                )
                 parsed = _extract_json(raw)
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -82,7 +92,9 @@ async def generate_json(
     return QwenCall(response=parsed, raw=raw, latency_ms=elapsed_ms, attempts=attempts)
 
 
-async def _call_ollama(prompt: str, *, timeout: float) -> str:
+async def _call_ollama(
+    prompt: str, *, timeout: float, max_output_tokens: int | None = None
+) -> str:
     """Chama o endpoint /api/generate do Ollama com format=json.
 
     Não usamos langchain-ollama aqui pra reduzir overhead — uma chamada HTTP
@@ -101,22 +113,48 @@ async def _call_ollama(prompt: str, *, timeout: float) -> str:
         "think": settings.qwen_thinking_enabled,
         "options": {
             "temperature": settings.qwen_temperature,
-            "num_predict": settings.qwen_max_output_tokens,
+            "num_predict": max_output_tokens or settings.qwen_max_output_tokens,
             "num_ctx": 4096,  # JSON pequeno, contexto não precisa ser 8k
         },
     }
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"{settings.qwen_base_url}/api/generate",
-            json=payload,
-        )
-        response.raise_for_status()
-        body = response.json()
+    client = _get_client()
+    response = await client.post(
+        f"{settings.qwen_base_url}/api/generate",
+        json=payload,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    body = response.json()
     return str(body.get("response", ""))
 
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    """Retorna o ``AsyncClient`` compartilhado (keep-alive) para o Ollama.
+
+    Reusar o client mantém o pool de conexões quente — evita um novo handshake
+    TCP a cada chamada Qwen. Timeout é passado por request (varia por chamada).
+    """
+    global _client  # noqa: PLW0603
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=32, max_connections=64),
+        )
+    return _client
+
+
+async def close_client() -> None:
+    """Fecha o client compartilhado (chamar no shutdown do processo / testes)."""
+    global _client  # noqa: PLW0603
+    if _client is not None and not _client.is_closed:
+        await _client.aclose()
+    _client = None
+
+
 def _extract_json(raw: str) -> dict[str, Any]:
-    """Extrai um objeto JSON da resposta crua.
+    r"""Extrai um objeto JSON da resposta crua.
 
     Tolera ``<thinking>`` tags do Qwen, prefixos/sufixos de explicação,
     e markdown ``\`\`\`json``. Estratégia: tentar parse direto; se falhar,

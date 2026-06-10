@@ -27,6 +27,7 @@ from uuid import UUID
 from loguru import logger
 
 from melicrowd.agents.state import AgentState
+from melicrowd.sellers.models import SellerPersona
 
 LOGGER: Final = logger.bind(module="observability.live_tracker")
 
@@ -147,6 +148,12 @@ _PERSONA_ARCHETYPE_BY_INCOME = {
     "D": ("bargain_hunter", "#FACC15"),
 }
 
+_SELLER_ARCHETYPE_BY_STRATEGY: Final[dict[str, tuple[str, str]]] = {
+    "aggressive": ("aggressive_seller", "#EF4444"),
+    "standard": ("standard_seller", "#F97316"),
+    "premium": ("premium_seller", "#A855F7"),
+}
+
 
 def _persona_to_dict(state: AgentState) -> dict[str, Any]:
     """Converte Persona Pydantic para o shape leve esperado pelo frontend."""
@@ -164,6 +171,26 @@ def _persona_to_dict(state: AgentState) -> dict[str, Any]:
         "incomeClass": p.income_class.value,
         "priceSensitivity": p.price_sensitivity,
         "abandonmentLikelihood": p.abandonment_likelihood,
+    }
+
+
+def _seller_persona_to_dict(persona: SellerPersona) -> dict[str, Any]:
+    """Shape leve de persona seller para o Live Floor."""
+    archetype, color = _SELLER_ARCHETYPE_BY_STRATEGY.get(
+        persona.price_strategy.value, ("standard_seller", "#F97316")
+    )
+    return {
+        "name": persona.owner_name,
+        "storeName": persona.store_name,
+        "age": 0,
+        "city": persona.location_city,
+        "state": persona.location_state,
+        "archetype": archetype,
+        "color": color,
+        "incomeClass": "",
+        "priceStrategy": persona.price_strategy.value,
+        "priceSensitivity": 0.0,
+        "abandonmentLikelihood": 0.0,
     }
 
 
@@ -262,6 +289,7 @@ class LiveAgentTracker:
         *,
         kind: str = "buyer",
         persona_name: str | None = None,
+        seller_persona: SellerPersona | None = None,
     ) -> None:
         """Atualiza ``station`` de um worker sem reconstruir todo o snapshot.
 
@@ -274,10 +302,13 @@ class LiveAgentTracker:
                 # Registra automaticamente se não existe ainda.
                 snap = _idle_snapshot(worker_id, kind=kind)
                 self._workers[worker_id] = snap
+            snap.kind = kind
             snap.station = station
             snap.status = "idle" if station.endswith("_idle") else "in_session"
             snap.lastActionAt = time.time() * 1000
-            if persona_name and snap.persona.get("name") in ("—", ""):
+            if seller_persona is not None:
+                snap.persona = _seller_persona_to_dict(seller_persona)
+            elif persona_name and snap.persona.get("name") in ("—", ""):
                 snap.persona = dict(snap.persona)
                 snap.persona["name"] = persona_name
 
